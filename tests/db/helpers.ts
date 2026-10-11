@@ -26,7 +26,10 @@ export async function withClient<T>(fn: (c: Client) => Promise<T>) {
 export async function asUser<T>(c: Client, sub: string, fn: () => Promise<T>) {
   await c.query("set local role authenticated");
   await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub, role: "authenticated" })]);
-  try { return await fn(); } finally { await c.query("reset role"); }
+  try { return await fn(); } finally {
+    await c.query("reset role");
+    await c.query("select set_config('request.jwt.claims', '', true)"); // no stale auth.uid() for later superuser queries
+  }
 }
 export async function asService<T>(c: Client, fn: () => Promise<T>) {
   await c.query("set local role service_role");
