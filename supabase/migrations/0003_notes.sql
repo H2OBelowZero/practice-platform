@@ -17,24 +17,23 @@ create table note_versions (id bigserial primary key, note_id uuid not null refe
 create table note_addenda (id uuid primary key default gen_random_uuid(), note_id uuid not null references clinical_notes,
   content text not null check (length(btrim(content)) > 0), author_id uuid not null, created_at timestamptz not null default now());
 
--- Immutability + state machine for clinical notes; applies to every caller including the owner.
--- Allowed transitions: draft -> signed (sign_note), signed/amended -> amended (add_addendum).
--- sign_note / add_addendum raise a single-use transaction-local flag (app.note_op) that this guard consumes.
--- ponytail: a caller can set the flag themselves, but only to sign/amend their own note without an audit row; use a
--- security definer sign_note if that ever matters.
+-- Immutability + state machine for clinical notes; applies to every caller including the owner and service_role.
+-- Allowed transitions: draft -> signed (author only, audited here), signed -> amended (only once an addendum exists).
+-- Everything is enforced in triggers, so direct table writes get the same protection as sign_note / add_addendum.
 create function notes_guard() returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
-declare op text := coalesce(current_setting('app.note_op', true), '');
 begin
   if tg_op = 'INSERT' then
     if new.state <> 'draft' or new.signed_at is not null then raise exception 'note must be created as a draft'; end if;
     return new; end if;
   if tg_op = 'DELETE' then raise exception 'note is immutable'; end if; -- clinical records are retained, drafts included
-  perform set_config('app.note_op', '', true);
   if new.id is distinct from old.id or new.patient_id is distinct from old.patient_id
      or new.author_id is distinct from old.author_id or new.created_at is distinct from old.created_at then
     raise exception 'note is immutable'; end if;
   if old.state = 'draft' then
-    if new.state = 'signed' and op = 'sign' then new.signed_at := now();
+    if new.state = 'signed' then
+      if old.author_id is distinct from auth.uid() then raise exception 'not_author'; end if; -- also rejects uid-less callers
+      new.signed_at := now();
+      perform audit_write('note.sign','clinical_notes',new.id);
     elsif new.state <> 'draft' then raise exception 'invalid_state_transition';
     elsif new.signed_at is not null then raise exception 'signed_at is set only by sign_note'; end if;
     if new.content is distinct from old.content then
@@ -45,45 +44,44 @@ begin
     if new.content is distinct from old.content or new.risk is distinct from old.risk or new.template_id is distinct from old.template_id
        or new.appointment_id is distinct from old.appointment_id or new.signed_at is distinct from old.signed_at then
       raise exception 'note is immutable'; end if;
-    if new.state is distinct from old.state and not (new.state = 'amended' and op = 'addendum') then
+    if new.state is distinct from old.state and not (old.state = 'signed' and new.state = 'amended'
+         and exists (select 1 from note_addenda where note_id = new.id)) then
       raise exception 'invalid_state_transition'; end if;
   end if;
   return new; end $$;
 create trigger trg_notes_guard before insert or update or delete on clinical_notes for each row execute function notes_guard();
 
--- versions and addenda are append-only; addenda only on signed/amended notes (checked under the caller's RLS)
+-- versions and addenda are append-only
 create function append_only_guard() returns trigger language plpgsql as
 $$ begin raise exception '% is append-only', tg_table_name; end $$;
 create trigger note_versions_no_change before update or delete on note_versions for each row execute function append_only_guard();
 create trigger note_addenda_no_change before update or delete on note_addenda for each row execute function append_only_guard();
-create function addenda_guard() returns trigger language plpgsql set search_path = public, pg_temp as $$
+
+-- addendum: parent must be signed/amended and the author is the caller; afterwards the note becomes amended and the action is audited
+create function addenda_guard() returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
 begin
   if not exists (select 1 from clinical_notes where id = new.note_id and state in ('signed','amended')) then
     raise exception 'note_not_signed'; end if;
+  if auth.uid() is not null and new.author_id is distinct from auth.uid() then raise exception 'not_author'; end if;
   return new; end $$;
 create trigger note_addenda_on_signed before insert on note_addenda for each row execute function addenda_guard();
+create function addenda_after() returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  update clinical_notes set state = 'amended' where id = new.note_id and state = 'signed';
+  perform audit_write('note.addendum','clinical_notes',new.note_id);
+  return null; end $$;
+create trigger note_addenda_amend after insert on note_addenda for each row execute function addenda_after();
 
+-- thin wrappers (security invoker: RLS applies); the triggers above do the work
 create function sign_note(p_note uuid) returns void language plpgsql security invoker set search_path = public, pg_temp as $$
-declare a uuid; s text;
 begin
-  select author_id, state into a, s from clinical_notes where id = p_note for update;
-  if not found or a is distinct from auth.uid() then raise exception 'not_author'; end if; -- invisible notes look the same
-  if s <> 'draft' then raise exception 'note not draftable'; end if;
-  perform set_config('app.note_op', 'sign', true);
-  update clinical_notes set state='signed' where id=p_note;
-  perform set_config('app.note_op', '', true);
-  perform audit_write('note.sign','clinical_notes',p_note); end $$;
+  update clinical_notes set state='signed' where id=p_note and state='draft';
+  if not found then -- RLS hides other people's notes from non-psychologists
+    raise exception '%', case when coalesce(auth_role()::text,'') = 'psychologist' then 'note not draftable' else 'not_author' end;
+  end if; end $$;
 create function add_addendum(p_note uuid, p_content text) returns void language plpgsql security invoker set search_path = public, pg_temp as $$
-declare s text;
 begin
-  select state into s from clinical_notes where id = p_note for update;
-  if not found then raise exception 'note_not_found'; end if;
-  if s = 'draft' then raise exception 'note_not_signed'; end if;
-  insert into note_addenda(note_id,content,author_id) values (p_note,p_content,auth.uid());
-  perform set_config('app.note_op', 'addendum', true);
-  update clinical_notes set state='amended' where id=p_note and state in ('signed','amended');
-  perform set_config('app.note_op', '', true);
-  perform audit_write('note.addendum','clinical_notes',p_note); end $$;
+  insert into note_addenda(note_id,content,author_id) values (p_note,p_content,auth.uid()); end $$;
 
 alter table note_templates enable row level security; alter table clinical_notes enable row level security;
 alter table note_versions enable row level security; alter table note_addenda enable row level security;
@@ -104,6 +102,10 @@ revoke update, delete on note_addenda from authenticated, service_role;
 
 revoke execute on function notes_guard() from public, anon;
 grant execute on function notes_guard() to authenticated, service_role;
+revoke execute on function addenda_guard() from public, anon;
+grant execute on function addenda_guard() to authenticated, service_role;
+revoke execute on function addenda_after() from public, anon;
+grant execute on function addenda_after() to authenticated, service_role;
 revoke execute on function sign_note(uuid) from public, anon;
 grant execute on function sign_note(uuid) to authenticated, service_role;
 revoke execute on function add_addendum(uuid, text) from public, anon;

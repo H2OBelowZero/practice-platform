@@ -79,11 +79,10 @@ it("non-draft notes reject changes to content, risk, template, appointment, pati
   expect((await c.query("select template_id from clinical_notes where id=$1", [n])).rows[0].template_id).toBe(tpl);
 }));
 
-it("state machine: only draft->signed via sign_note and signed/amended->amended via add_addendum", () => withClient(async (c) => {
+it("state machine: draft->signed by the author, signed->amended only with an addendum, nothing else", () => withClient(async (c) => {
   const { psy, n } = await mk(c);
   await asUser(c, psy, async () => {
-    for (const s of ["signed", "amended"]) // direct promotion of a draft
-      await expect(c.query(`update clinical_notes set state='${s}' where id=$1`, [n]), s).rejects.toThrow(/invalid_state_transition/);
+    await expect(c.query("update clinical_notes set state='amended' where id=$1", [n])).rejects.toThrow(/invalid_state_transition/);
     await expect(c.query("update clinical_notes set signed_at=now() where id=$1", [n])).rejects.toThrow(/signed_at/);
     await sign(c, n);
     for (const s of ["draft", "amended"]) // regress, or amend without an addendum
@@ -98,14 +97,42 @@ it("state machine: only draft->signed via sign_note and signed/amended->amended 
   await expect(c.query("update clinical_notes set state='draft' where id=$1", [n])).rejects.toThrow(/invalid_state_transition/);
 }));
 
-it("the single-use sign/addendum flag cannot be replayed on another note", () => withClient(async (c) => {
-  const { psy, p } = await mk(c);
-  const n2 = (await c.query("insert into clinical_notes(patient_id,author_id) values ($1,$2) returning id", [p, psy])).rows[0].id;
-  const n3 = (await c.query("insert into clinical_notes(patient_id,author_id) values ($1,$2) returning id", [p, psy])).rows[0].id;
+it("direct writes get the same protection: the author's UPDATE signs once with one audit row", () => withClient(async (c) => {
+  const { psy, n } = await mk(c);
+  await asUser(c, psy, () => c.query("update clinical_notes set state='signed' where id=$1", [n]));
+  const r = (await c.query("select state, signed_at = now() as at_now from clinical_notes where id=$1", [n])).rows[0];
+  expect(r).toEqual({ state: "signed", at_now: true });
+  const audit = (await c.query("select action, actor_id from audit_log where entity_id=$1", [n])).rows;
+  expect(audit).toEqual([{ action: "note.sign", actor_id: psy }]);
+}));
+
+it("direct INSERT into note_addenda amends the note and writes one audit row", () => withClient(async (c) => {
+  const { psy, n } = await mk(c);
   await asUser(c, psy, async () => {
-    await sign(c, n2);
-    await expect(c.query("update clinical_notes set state='signed' where id=$1", [n3])).rejects.toThrow(/invalid_state_transition/);
+    await sign(c, n);
+    await c.query("insert into note_addenda(note_id,content,author_id) values ($1,'direct',$2)", [n, psy]);
+    expect(await state(c, n)).toBe("amended");
   });
+  const audit = (await c.query("select action, actor_id from audit_log where entity_id=$1 order by id", [n])).rows;
+  expect(audit).toEqual([{ action: "note.sign", actor_id: psy }, { action: "note.addendum", actor_id: psy }]);
+}));
+
+it("a signed note cannot be flipped to amended without an addendum, and a forged app.note_op flag does nothing", () => withClient(async (c) => {
+  const { psy, n } = await mk(c);
+  const psy2 = await mkUser(c, "psychologist");
+  const flag = (v: string) => c.query("select set_config('app.note_op', $1, true)", [v]);
+  await asUser(c, psy2, async () => {
+    await flag("sign");
+    await expect(c.query("update clinical_notes set state='signed' where id=$1", [n])).rejects.toThrow(/not_author/);
+    await expect(sign(c, n)).rejects.toThrow(/not_author/);
+  });
+  expect(await state(c, n)).toBe("draft");
+  await asUser(c, psy, async () => {
+    await sign(c, n);
+    await flag("addendum");
+    await expect(c.query("update clinical_notes set state='amended' where id=$1", [n])).rejects.toThrow(/invalid_state_transition/);
+  });
+  expect(await state(c, n)).toBe("signed");
 }));
 
 it("only the author can sign; addenda are attributed to the caller and need a signed note", () => withClient(async (c) => {
@@ -114,17 +141,18 @@ it("only the author can sign; addenda are attributed to the caller and need a si
   for (const u of [psy2, adm, bk, pu, assoc])
     await expect(asUser(c, u, () => sign(c, n))).rejects.toThrow(/not_author/);
   await expect(asService(c, () => sign(c, n))).rejects.toThrow(/not_author/);
+  await expect(asService(c, () => c.query("update clinical_notes set state='signed' where id=$1", [n]))).rejects.toThrow(/not_author/);
+  await expect(c.query("update clinical_notes set state='signed' where id=$1", [n])).rejects.toThrow(/not_author/); // owner has no uid either
   expect(await state(c, n)).toBe("draft");
   await expect(asUser(c, psy, () => c.query("select add_addendum($1,'too early')", [n]))).rejects.toThrow(/note_not_signed/);
-  // direct insert on a draft is rejected too, and a spoofed author is rejected
   await expect(asUser(c, psy, () => c.query("insert into note_addenda(note_id,content,author_id) values ($1,'x',$2)", [n, psy]))).rejects.toThrow(/note_not_signed/);
   await asUser(c, psy, async () => { await sign(c, n); });
   await expect(asUser(c, psy, () => sign(c, n))).rejects.toThrow(/note not draftable/); // already signed
   await asUser(c, psy2, () => c.query("select add_addendum($1,'second opinion')", [n]));
   expect((await c.query("select author_id from note_addenda where note_id=$1", [n])).rows[0].author_id).toBe(psy2);
-  await expect(asUser(c, psy2, () => c.query("insert into note_addenda(note_id,content,author_id) values ($1,'x',$2)", [n, psy]))).rejects.toThrow(/row-level security/);
-  await expect(asUser(c, psy, () => c.query("select add_addendum($1,'')", [n]))).rejects.toThrow(/content/);
-  await expect(asUser(c, psy, () => c.query("select add_addendum(gen_random_uuid(),'x')"))).rejects.toThrow(/note_not_found/);
+  await expect(asUser(c, psy2, () => c.query("insert into note_addenda(note_id,content,author_id) values ($1,'x',$2)", [n, psy]))).rejects.toThrow(/not_author/); // spoofed author
+  await expect(asUser(c, psy, () => c.query("select add_addendum($1,' ')", [n]))).rejects.toThrow(/note_addenda_content_check/);
+  await expect(asUser(c, psy, () => c.query("select add_addendum(gen_random_uuid(),'x')"))).rejects.toThrow(/note_not_signed/);
 }));
 
 it("inserted notes must be drafts authored by the caller", () => withClient(async (c) => {
@@ -143,7 +171,7 @@ it("inserted notes must be drafts authored by the caller", () => withClient(asyn
 }));
 
 it("drafts: author and patient are fixed, every content change keeps the previous content as a version", () => withClient(async (c) => {
-  const { psy, n, p } = await mk(c);
+  const { psy, n } = await mk(c);
   const other = (await c.query("insert into patients(first_name,last_name) values ('O','O') returning id")).rows[0].id;
   const psy2 = await mkUser(c, "psychologist");
   await asUser(c, psy, async () => {
@@ -158,7 +186,6 @@ it("drafts: author and patient are fixed, every content change keeps the previou
     expect(rows.every((r) => r.saved_by === psy)).toBe(true);
     expect((await c.query("select content from clinical_notes where id=$1", [n])).rows[0].content).toEqual({ s: "e3" });
   });
-  expect(p).toBeTruthy();
 }));
 
 it("note_versions and note_addenda are append-only for everyone", () => withClient(async (c) => {
@@ -170,6 +197,7 @@ it("note_versions and note_addenda are append-only for everyone", () => withClie
       "update note_addenda set content='z'", "delete from note_addenda"])
       await expect(c.query(q), q).rejects.toThrow(/permission denied/);
   });
+  // privilege revokes on note_versions/note_addenda rely on the harness default grants (Supabase grants API roles all on new tables)
   await asService(c, async () => {
     for (const q of ["update note_versions set content='{}'", "delete from note_versions", "insert into note_versions(note_id,version_no,content) select id,99,'{}' from clinical_notes",
       "update note_addenda set content='z'", "delete from note_addenda"])
@@ -188,8 +216,9 @@ it("non-psychologists cannot insert, update or delete notes or addenda", () => w
     await asUser(c, u, async () => {
       await expect(c.query("insert into clinical_notes(patient_id,author_id) values ($1,$2)", [p, u]), role).rejects.toThrow(/row-level security/);
       await expect(c.query("insert into clinical_notes(patient_id,author_id) values ($1,$2)", [p, psy]), role).rejects.toThrow(/row-level security/);
-      await expect(c.query("insert into note_addenda(note_id,content,author_id) values ($1,'x',$2)", [n, u]), role).rejects.toThrow(/note_not_signed|row-level security/);
-      await expect(c.query("select add_addendum($1,'x')", [n]), role).rejects.toThrow(/note_not_found/);
+      await expect(c.query("insert into note_addenda(note_id,content,author_id) values ($1,'x',$2)", [n, u]), role).rejects.toThrow(/row-level security|permission denied/);
+      await expect(c.query("select add_addendum($1,'x')", [n]), role).rejects.toThrow(/row-level security|permission denied/);
+      await expect(c.query("select sign_note($1)", [d]), role).rejects.toThrow(/not_author/);
       expect((await c.query("update clinical_notes set content='{\"s\":\"hack\"}' where id=$1", [d])).rowCount, role).toBe(0);
       expect((await c.query("delete from clinical_notes where id=$1", [d])).rowCount, role).toBe(0);
     });
@@ -216,6 +245,16 @@ it("anon cannot execute the note functions", () => withClient(async (c) => {
   await expect(asAnon(c, () => sign(c, n))).rejects.toThrow(/permission denied/);
   await expect(asAnon(c, () => c.query("select add_addendum($1,'x')", [n]))).rejects.toThrow(/permission denied/);
   const { rows } = await c.query(
-    "select p.proname, has_function_privilege('anon', p.oid,'execute') a, has_function_privilege('authenticated', p.oid,'execute') u, has_function_privilege('service_role', p.oid,'execute') s from pg_proc p where proname in ('sign_note','add_addendum','notes_guard') order by 1");
-  expect(rows.map((r) => [r.proname, r.a, r.u, r.s])).toEqual([["add_addendum", false, true, true], ["notes_guard", false, true, true], ["sign_note", false, true, true]]);
+    "select p.proname, has_function_privilege('anon', p.oid,'execute') a, has_function_privilege('authenticated', p.oid,'execute') u, has_function_privilege('service_role', p.oid,'execute') s from pg_proc p where proname in ('sign_note','add_addendum','notes_guard','addenda_guard','addenda_after')");
+  expect(rows.map((r) => [r.proname, r.a, r.u, r.s]).sort()).toEqual(["add_addendum", "addenda_after", "addenda_guard", "notes_guard", "sign_note"].map((f) => [f, false, true, true]));
+}));
+
+it("templates are read-only for the psychologist (no write policy)", () => withClient(async (c) => {
+  const { psy } = await mk(c);
+  await asUser(c, psy, async () => {
+    await expect(c.query("insert into note_templates(name,schema) values ('X','{}')")).rejects.toThrow(/row-level security/);
+    expect((await c.query("update note_templates set name='X'")).rowCount).toBe(0); // no update policy: rows are invisible to UPDATE
+    expect((await c.query("delete from note_templates")).rowCount).toBe(0);
+  });
+  expect((await c.query("select count(*)::int n from note_templates where name='X'")).rows[0].n).toBe(0);
 }));
