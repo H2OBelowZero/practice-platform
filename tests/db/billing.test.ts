@@ -53,7 +53,7 @@ it("setup insert order from the brief works for the owner: issued invoice, porti
   const cl = (await c.query("insert into claims(invoice_id,member_id,status,claimed_cents) values ($1,$2,'submitted',80000) returning id", [i, m])).rows[0];
   const s = (await c.query("select submitted_at from claims where id=$1", [cl.id])).rows[0];
   expect(s.submitted_at).not.toBeNull(); // stamped even for a direct insert
-  await c.query("insert into payments(invoice_id,method,amount_cents,gateway_ref) values ($1,'eft',100000,'X')", [i]);
+  await c.query("insert into payments(invoice_id,method,amount_cents,reference) values ($1,'eft',100000,'X')", [i]);
   expect(await status(c, i)).toBe("paid"); // direct owner insert still recomputes
 }));
 
@@ -101,7 +101,7 @@ it("money fields are frozen once issued; due_date stays editable; draft fields a
   await as(c, psy, "update invoices set subtotal_cents=1, discount_cents=1, vat_cents=1, issue_date='2030-01-01' where id=$1", [id]);
   await expect(as(c, psy, "update invoices set number='ZZ-1' where id=$1", [id])).rejects.toThrow(/invoice_frozen/); // frozen even as a draft
   await as(c, psy, "update invoices set status='issued' where id=$1", [id]);
-  expect((await c.query("select issue_date = current_date as ok from invoices where id=$1", [id])).rows[0].ok).toBe(true); // stamped on issue
+  expect((await c.query("select issue_date = (now() at time zone 'Africa/Johannesburg')::date as ok from invoices where id=$1", [id])).rows[0].ok).toBe(true); // stamped on issue
   const sets = [`patient_id='${p2}'`, "appointment_id=gen_random_uuid()", "number='ZZ-2'", "issue_date='2031-01-01'",
     "subtotal_cents=2", "discount_cents=2", "vat_cents=2", "total_cents=2", "scheme_portion_cents=1", "patient_portion_cents=1", "payer_type='split'"];
   for (const s of sets) await expect(as(c, psy, `update invoices set ${s} where id=$1`, [id]), s).rejects.toThrow(/invoice_frozen/);
@@ -250,6 +250,30 @@ it("guards fail closed: a custom login role that is not postgres/superuser is bo
     await c.query("select set_config('request.jwt.claims', '', true)");
   }
   expect(await status(c, i)).toBe("issued");
+}));
+
+it("guards trust the owner of the table being written, whatever its name", () => withClient(async (c) => {
+  const { psy, p1 } = await seed(c);
+  await c.query("create role tbl_owner"); // a non-superuser that owns a copy of the invoices table with the same guard
+  await c.query("create role app_x2 login");
+  await c.query("grant authenticated to app_x2");
+  await c.query("create table inv_copy (like invoices including defaults)");
+  await c.query("alter table inv_copy owner to tbl_owner");
+  await c.query("grant usage on sequence invoice_seq to tbl_owner");
+  await c.query("grant all on inv_copy to app_x2");
+  await c.query("create trigger g before insert or update on inv_copy for each row execute function invoices_guard()");
+  await c.query("set local role tbl_owner");
+  try {
+    await c.query("insert into inv_copy(patient_id,total_cents,patient_portion_cents,status) values ($1,100,100,'issued')", [p1]); // the draft-only rule does not bind the owner
+    await c.query("update inv_copy set status='paid'"); // nor the transition rule
+  } finally { await c.query("reset role"); }
+  await c.query("update inv_copy set status='issued'");
+  await c.query("set local role app_x2");
+  await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: psy, role: "authenticated" })]);
+  try {
+    await expect(c.query("update inv_copy set status='paid'")).rejects.toThrow(/invalid_invoice_transition/); // same table, other role: bound
+    await expect(c.query("insert into inv_copy(patient_id,status) values ($1,'issued')", [p1])).rejects.toThrow(/invoice_must_start_as_draft/);
+  } finally { await c.query("reset role"); await c.query("select set_config('request.jwt.claims', '', true)"); }
 }));
 
 it("invoices / invoice_lines write matrix: only psychologist and admin write", () => withClient(async (c) => {

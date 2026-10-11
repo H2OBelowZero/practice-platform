@@ -268,7 +268,7 @@ it("remittance ref clashes with another invoice's or claim's payment are ref_con
   const { psy, p1, claim } = await setup(c);
   await setStatus(c, psy, claim, "submitted");
   const other = await mkInvoice(c, p1);
-  await pay(c, psy, other, "eft", 100, "SHARED");
+  await asService(c, () => c.query("select record_payment($1,'payfast',100,'SHARED',null)", [other]));
   await expect(remit(c, psy, claim, 100, "SHARED")).rejects.toThrow(/ref_conflict/);
   const j = await mkMaInvoice(c, p1);
   const c2 = (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,1000) returning id", [j.i, j.m])).rows[0].id;
@@ -321,6 +321,22 @@ it("remittance: staff only (psychologist, admin, or the service role); audited",
   expect(a[0].detail).toMatchObject({ amount: 100, ref: "R-adm" });
   expect((await c.query("select actor from claim_events where claim_id=$1 and event='remittance' order by id", [claim])).rows[0].actor).toBe(adm);
   expect((await c.query("select recorded_by from payments where gateway_ref='R-adm'")).rows[0].recorded_by).toBe(adm);
+}));
+
+it("claims_guard binds an untrusted custom role: no paid status, no amount change after submission", () => withClient(async (c) => {
+  const { psy, claim } = await setup(c);
+  await setStatus(c, psy, claim, "submitted");
+  await c.query("create role app_z login");
+  await c.query("grant authenticated to app_z");
+  await c.query("set local role app_z");
+  await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: psy, role: "authenticated" })]);
+  try {
+    await expect(c.query("update claims set status='paid' where id=$1", [claim])).rejects.toThrow(/invalid_claim_transition/);
+    await expect(c.query("update claims set status='part_paid' where id=$1", [claim])).rejects.toThrow(/invalid_claim_transition/);
+    await expect(c.query("update claims set claimed_cents=1 where id=$1", [claim])).rejects.toThrow(/claim_amount_frozen/);
+    await expect(c.query("insert into claims(invoice_id,member_id,status) select invoice_id, member_id, 'submitted' from claims")).rejects.toThrow(/claim_must_start_as_draft/);
+  } finally { await c.query("reset role"); await c.query("select set_config('request.jwt.claims', '', true)"); }
+  expect(await cs(c, claim)).toBe("submitted");
 }));
 
 it("claim_payments are append-only and written only by the remittance function", () => withClient(async (c) => {

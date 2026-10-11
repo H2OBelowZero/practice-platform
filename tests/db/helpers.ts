@@ -34,7 +34,10 @@ export async function asUser<T>(c: Client, sub: string, fn: () => Promise<T>) {
 export async function asService<T>(c: Client, fn: () => Promise<T>) {
   await c.query("set local role service_role");
   await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ role: "service_role" })]);
-  try { return await fn(); } finally { await c.query("reset role"); }
+  try { return await fn(); } finally {
+    await c.query("reset role");
+    await c.query("select set_config('request.jwt.claims', '', true)"); // do not leave a service_role claim behind
+  }
 }
 export async function mkUser(c: Client, role: string, name = role) {
   const { rows } = await c.query(

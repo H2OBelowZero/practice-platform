@@ -1,7 +1,7 @@
 import type { Client } from "pg";
 import { it, expect } from "vitest";
 import { withClient, asService } from "./helpers";
-import { seed, mkInvoice, status, paid, count, as, pay } from "./billing-helpers";
+import { seed, mkInvoice, mkMaInvoice, status, paid, count, as, pay } from "./billing-helpers";
 
 const svc = (c: Client, i: string, amount: number, ref: string | null, by: string | null = null, method = "payfast") =>
   asService(c, () => c.query("select record_payment($1,$2,$3,$4,$5) id", [i, method, amount, ref, by]));
@@ -33,17 +33,37 @@ it("service role (PayFast ITN): payfast only, ref required, p_by recorded", () =
   expect(await paid(c, i)).toBe(1000);
 }));
 
+it("the service path needs a service_role JWT (or a trusted connection): an untrusted login role without a JWT is forbidden", () => withClient(async (c) => {
+  const { psy, p1 } = await seed(c);
+  const { i, m } = await mkMaInvoice(c, p1);
+  const cl = (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,1000) returning id", [i, m])).rows[0].id;
+  await as(c, psy, "update claims set status='submitted' where id=$1", [cl]);
+  await c.query("create role app_y login");
+  await c.query("grant authenticated to app_y");
+  await c.query("set local role app_y"); // no JWT claims at all: auth.uid() is null
+  try {
+    await expect(c.query("select record_payment($1,'payfast',100,'PF-NOJWT',null)", [i])).rejects.toThrow(/forbidden/);
+    await expect(c.query("select record_scheme_remittance($1,100,'R-NOJWT')", [cl])).rejects.toThrow(/forbidden/);
+    await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ role: "anon" })]);
+    await expect(c.query("select record_payment($1,'payfast',100,'PF-ANON',null)", [i])).rejects.toThrow(/forbidden/);
+  } finally { await c.query("reset role"); await c.query("select set_config('request.jwt.claims', '', true)"); }
+  expect(await paid(c, i)).toBe(0);
+  await svc(c, i, 100, "PF-OK"); // the service role is accepted
+  await c.query("select record_scheme_remittance($1,100,'R-OK')", [cl]); // so is the trusted connection
+  expect(await paid(c, i)).toBe(200);
+}));
+
 it("function privileges: _record_payment is internal; record_payment is not callable by anon", () => withClient(async (c) => {
   const priv = async (role: string, fn: string) => (await c.query("select has_function_privilege($1, $2, 'execute') ok", [role, fn])).rows[0].ok;
-  for (const r of ["public", "anon", "authenticated", "service_role"]) expect(await priv(r, "_record_payment(uuid,text,int,text,uuid,date,boolean)"), r).toBe(false);
-  expect(await priv("anon", "record_payment(uuid,text,int,text,uuid,date)")).toBe(false);
-  expect(await priv("authenticated", "record_payment(uuid,text,int,text,uuid,date)")).toBe(true);
-  expect(await priv("service_role", "record_payment(uuid,text,int,text,uuid,date)")).toBe(true);
+  for (const r of ["public", "anon", "authenticated", "service_role"]) expect(await priv(r, "_record_payment(uuid,text,int,text,uuid,date,boolean,boolean)"), r).toBe(false);
+  expect(await priv("anon", "record_payment(uuid,text,int,text,uuid,date,boolean)")).toBe(false);
+  expect(await priv("authenticated", "record_payment(uuid,text,int,text,uuid,date,boolean)")).toBe(true);
+  expect(await priv("service_role", "record_payment(uuid,text,int,text,uuid,date,boolean)")).toBe(true);
   expect(await priv("anon", "record_scheme_remittance(uuid,int,text)")).toBe(false);
   const { psy, p1 } = await seed(c);
   const i = await mkInvoice(c, p1);
-  await expect(as(c, psy, "select _record_payment($1,'eft',1000,'Z',null,current_date,false)", [i])).rejects.toThrow(/permission denied/);
-  await expect(asService(c, () => c.query("select _record_payment($1,'payfast',1000,'X',null,current_date,true)", [i]))).rejects.toThrow(/permission denied/);
+  await expect(as(c, psy, "select _record_payment($1,'eft',1000,'Z',null,(now() at time zone 'Africa/Johannesburg')::date,false,false)", [i])).rejects.toThrow(/permission denied/);
+  await expect(asService(c, () => c.query("select _record_payment($1,'payfast',1000,'X',null,(now() at time zone 'Africa/Johannesburg')::date,true,false)", [i]))).rejects.toThrow(/permission denied/);
   await expect(asService(c, () => c.query("select invoice_recompute($1)", [i]))).rejects.toThrow(/permission denied/);
 }));
 
@@ -103,23 +123,56 @@ it("service role replay (same invoice, amount and method) is a no-op; anything e
   expect((await svc(c, k, 500, "PF-K")).rows[0].id).toBe(first);
 }));
 
-it("user sessions never get a silent no-op: an existing ref is duplicate_ref", () => withClient(async (c) => {
-  const { psy, adm, p1 } = await seed(c);
-  const i = await mkInvoice(c, p1), j = await mkInvoice(c, p1);
-  await pay(c, psy, i, "eft", 4000, "EFT-1");
-  for (const [u, inv, amt, m] of [[psy, i, 4000, "eft"], [adm, i, 4000, "eft"], [psy, i, 10, "eft"], [psy, j, 4000, "eft"], [psy, i, 4000, "card_machine"]] as const)
-    await expect(pay(c, u, inv, m, amt, "EFT-1"), `${m} ${amt}`).rejects.toThrow(/duplicate_ref/);
-  await svc(c, i, 100, "PF-1");
-  await expect(pay(c, psy, i, "eft", 100, "PF-1")).rejects.toThrow(/duplicate_ref/); // a gateway ref cannot be reused manually either
-  expect(await paid(c, i)).toBe(4100);
+it("manual payments keep their reference in reference, never in gateway_ref; repeated references are allowed", () => withClient(async (c) => {
+  const { psy, adm, p1, p2 } = await seed(c);
+  const i = await mkInvoice(c, p1), j = await mkInvoice(c, p2);
+  await pay(c, psy, i, "eft", 4000, "BANK-1");
+  await pay(c, adm, i, "eft", 4001, "BANK-1"); // same bank reference, other amount
+  await pay(c, psy, i, "eft", 4000, "BANK-1", "2020-01-01"); // other date
+  await pay(c, psy, j, "eft", 4000, "BANK-1"); // two patients can quote the same reference
+  await pay(c, psy, i, "card_machine", 4000, "BANK-1"); // other method
+  const rows = (await c.query("select gateway_ref, reference, method from payments where reference='BANK-1' order by amount_cents, method")).rows;
+  expect(rows).toHaveLength(5);
+  for (const r of rows) expect(r.gateway_ref).toBeNull();
+  expect(await paid(c, i)).toBe(4000 + 4001 + 4000 + 4000);
+  // a payfast gateway ref is a different namespace from a manual reference
+  await svc(c, i, 100, "SAME-STRING");
+  await pay(c, psy, i, "eft", 100, "SAME-STRING");
+  expect((await c.query("select 1 from payments where gateway_ref='SAME-STRING'")).rowCount).toBe(1);
+  // the table itself keeps the two apart
+  await expect(c.query("insert into payments(invoice_id,method,amount_cents,gateway_ref) values ($1,'eft',1,'G')", [i])).rejects.toThrow(/check constraint/);
+  await expect(c.query("insert into payments(invoice_id,method,amount_cents,reference) values ($1,'payfast',1,'G')", [i])).rejects.toThrow(/check constraint/);
 }));
 
-it("the same ref across methods: an eft ref replayed as payfast is ref_conflict", () => withClient(async (c) => {
-  const { psy, p1 } = await seed(c);
+it("double-submit protection: same invoice, method, amount, reference and date is possible_duplicate unless p_allow_duplicate", () => withClient(async (c) => {
+  const { psy, adm, p1 } = await seed(c);
   const i = await mkInvoice(c, p1);
-  await pay(c, psy, i, "eft", 4000, "SHARED-REF");
-  await expect(svc(c, i, 4000, "SHARED-REF")).rejects.toThrow(/ref_conflict/);
+  await pay(c, psy, i, "eft", 4000, "EFT-1");
+  await expect(pay(c, psy, i, "eft", 4000, "EFT-1")).rejects.toThrow(/possible_duplicate/);
+  await expect(pay(c, adm, i, "eft", 4000, " EFT-1 ")).rejects.toThrow(/possible_duplicate/);
   expect(await paid(c, i)).toBe(4000);
+  await pay(c, psy, i, "eft", 4000, "EFT-1", null, true);
+  expect((await c.query("select 1 from payments where reference='EFT-1'")).rowCount).toBe(2);
+  expect(await paid(c, i)).toBe(8000);
+  // cash has no reference: two identical cash payments on one day also need the flag
+  await pay(c, psy, i, "cash", 500);
+  await expect(pay(c, psy, i, "cash", 500)).rejects.toThrow(/possible_duplicate/);
+  await pay(c, psy, i, "cash", 500, null, null, true);
+  await pay(c, psy, i, "cash", 500, null, "2020-05-05"); // other date: fine
+  expect(await paid(c, i)).toBe(8000 + 1500);
+  // the service-role path is unaffected: replay on gateway_ref, ref_conflict on a mismatch
+  await svc(c, i, 100, "PF-D");
+  await expect(svc(c, i, 101, "PF-D")).rejects.toThrow(/ref_conflict/);
+}));
+
+it("a gateway ref reused across methods is ref_conflict (remittance ref replayed as payfast)", () => withClient(async (c) => {
+  const { psy, p1 } = await seed(c);
+  const { i, m } = await mkMaInvoice(c, p1);
+  const cl = (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,1000) returning id", [i, m])).rows[0].id;
+  await as(c, psy, "update claims set status='submitted' where id=$1", [cl]);
+  await as(c, psy, "select record_scheme_remittance($1,500,'GW-1')", [cl]);
+  await expect(svc(c, i, 500, "GW-1")).rejects.toThrow(/ref_conflict/);
+  expect(await paid(c, i)).toBe(500);
 }));
 
 // ---- manual payment details ---------------------------------------------------------------------------------------
@@ -131,14 +184,16 @@ it("eft and card_machine need a reference; cash does not; received_on defaults t
     await expect(as(c, psy, "select record_payment($1,$2,100,'  ',null)", [i, m]), m).rejects.toThrow(/ref_required/);
   }
   const cash = (await as(c, psy, "select record_payment($1,'cash',100,null,null) id", [i])).rows[0].id;
-  const r = (await c.query("select received_on = current_date as today, gateway_ref, recorded_by from payments where id=$1", [cash])).rows[0];
-  expect(r).toEqual({ today: true, gateway_ref: null, recorded_by: psy });
+  const r = (await c.query("select received_on = (now() at time zone 'Africa/Johannesburg')::date as today, gateway_ref, reference, recorded_by from payments where id=$1", [cash])).rows[0];
+  expect(r).toEqual({ today: true, gateway_ref: null, reference: null, recorded_by: psy });
+  const e = (await pay(c, psy, i, "eft", 100, "BANK-9")).rows[0].id;
+  expect((await c.query("select reference, gateway_ref from payments where id=$1", [e])).rows[0]).toEqual({ reference: "BANK-9", gateway_ref: null });
   const old = (await pay(c, psy, i, "eft", 100, "OLD", "2020-02-02")).rows[0].id;
   expect((await c.query("select received_on::text d from payments where id=$1", [old])).rows[0].d).toBe("2020-02-02");
   await expect(pay(c, psy, i, "eft", 100, "FUT", "2999-01-01")).rejects.toThrow(/future_date/);
   await expect(pay(c, psy, i, "cash", 100, null, "2999-01-01")).rejects.toThrow(/future_date/);
   await expect(asService(c, () => c.query("select record_payment($1,'payfast',100,'PF-F',null,'2999-01-01')", [i]))).rejects.toThrow(/future_date/);
-  expect(await paid(c, i)).toBe(200);
+  expect(await paid(c, i)).toBe(300);
 }));
 
 it("gateway payloads are not stored: payments has no raw_payload column", () => withClient(async (c) => {
@@ -168,7 +223,7 @@ it("each recorded payment is audited; a refused duplicate is not audited twice",
   const { psy, p1 } = await seed(c);
   const i = await mkInvoice(c, p1);
   const id = (await pay(c, psy, i, "eft", 1500, "AUD")).rows[0].id;
-  await expect(pay(c, psy, i, "eft", 1500, "AUD")).rejects.toThrow(/duplicate_ref/);
+  await expect(pay(c, psy, i, "eft", 1500, "AUD")).rejects.toThrow(/possible_duplicate/);
   const rows = (await c.query("select actor_id, role, entity, detail from audit_log where action='payment.record' and entity_id=$1", [id])).rows;
   expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ actor_id: psy, role: "psychologist", entity: "payments" });

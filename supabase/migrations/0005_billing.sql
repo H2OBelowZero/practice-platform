@@ -1,19 +1,37 @@
 -- supabase/migrations/0005_billing.sql
 -- Billing and medical-aid claims. All money is integer cents.
 --
--- Trust model used by the triggers below (fail closed): only postgres, supabase_admin and superusers are trusted; EVERY other
--- role (anon, authenticated, service_role and anything added later) is held to every business rule.
+-- Trust model used by the triggers below (fail closed): only superusers, postgres, supabase_admin and the owner of the table being
+-- written are trusted; EVERY other role (anon, authenticated, service_role and anything added later) is held to every business rule.
 -- The table owner (migrations, the security definer functions in this file, superuser test setup) is trusted, which is how
 -- invoice_recompute() can set 'paid' and record_scheme_remittance() can set 'part_paid' while a direct UPDATE by any API
 -- role cannot. Guard triggers that must tell the two apart are SECURITY INVOKER and test current_user (inside a security
 -- definer function current_user is the owner, i.e. postgres). No session flag or GUC is used, so a caller cannot spoof the bypass.
+
+-- Billing dates are South African dates, whatever the server's time zone.
+create function sa_today() returns date language sql stable as $$ select (now() at time zone 'Africa/Johannesburg')::date $$;
+
+-- Trust helpers (SECURITY INVOKER on purpose: they look at who is calling).
+-- _trusted_writer: used inside guard triggers; current_user is the effective role (the owner inside a security definer function).
+create function _trusted_writer(p_rel oid) returns boolean language sql stable as
+$$ select current_user in ('postgres','supabase_admin')
+       or coalesce((select rolsuper from pg_roles where rolname = current_user), false)
+       or current_user = (select pg_get_userbyid(c.relowner) from pg_class c where c.oid = p_rel) $$;
+-- _caller_trusted: used inside security definer functions, where current_user is already the owner; the GUC 'role' still holds
+-- the role the session switched to (PostgREST does SET ROLE), or 'none' for a direct connection, where session_user is the caller.
+create function _caller_trusted() returns boolean language sql stable as
+$$ select x.r in ('postgres','supabase_admin') or coalesce((select rolsuper from pg_roles where rolname = x.r), false)
+   from (select case when current_setting('role') = 'none' then session_user::text else current_setting('role') end as r) x $$;
+-- the role claim of the verified PostgREST JWT ('service_role' for the server-side key)
+create function _jwt_role() returns text language sql stable as
+$$ select coalesce(nullif(current_setting('request.jwt.claim.role', true), ''), nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role', '') $$;
 
 create sequence invoice_seq start 1;
 create table invoices (
   id uuid primary key default gen_random_uuid(),
   number text not null unique default 'INV-' || lpad(nextval('invoice_seq')::text, 5, '0'),
   patient_id uuid not null references patients, appointment_id uuid references appointments,
-  issue_date date not null default current_date, due_date date not null default current_date + 14,
+  issue_date date not null default sa_today(), due_date date not null default sa_today() + 14,
   status text not null default 'draft' check (status in ('draft','issued','part_paid','paid','void')),
   payer_type text not null default 'self' check (payer_type in ('self','medical_aid','split')),
   subtotal_cents int not null default 0 check (subtotal_cents >= 0),
@@ -30,10 +48,14 @@ create table credit_notes (id uuid primary key default gen_random_uuid(), invoic
 create table payments (
   id uuid primary key default gen_random_uuid(), invoice_id uuid not null references invoices,
   method text not null check (method in ('payfast','eft','cash','card_machine','medical_aid')),
-  gateway_ref text unique check (gateway_ref is null or btrim(gateway_ref) <> ''), amount_cents int not null check (amount_cents > 0),
+  -- gateway_ref: PayFast pf_payment_id / scheme remittance reference, globally unique, used ONLY for payfast and medical_aid.
+  -- reference: the bank reference, card slip or receipt number of a manual payment (not unique: genuine repeats exist).
+  gateway_ref text unique check (gateway_ref is null or btrim(gateway_ref) <> ''),
+  reference text check (reference is null or btrim(reference) <> ''), amount_cents int not null check (amount_cents > 0),
   status text not null default 'succeeded' check (status in ('pending','succeeded','failed')),
-  received_on date not null default current_date, -- the date the money arrived (manual payments may be back-dated, never future-dated)
-  verified_at timestamptz default now(), recorded_by uuid, created_at timestamptz not null default now()); -- no gateway payload is stored
+  received_on date not null default sa_today(), -- the date the money arrived (manual payments may be back-dated, never future-dated)
+  verified_at timestamptz default now(), recorded_by uuid, created_at timestamptz not null default now(), -- no gateway payload is stored
+  constraint payments_ref_columns check ((method in ('payfast','medical_aid') and reference is null) or (method not in ('payfast','medical_aid') and gateway_ref is null)));
 
 create table medical_aid_members (id uuid primary key default gen_random_uuid(), patient_id uuid not null references patients,
   scheme text not null, plan text, member_number text not null, dependant_code text, main_member_name text, valid_from date, valid_to date);
@@ -64,7 +86,7 @@ $$ select coalesce(sum(amount_cents),0)::int from payments where invoice_id = p_
 --     eligibility) are frozen as well; due_date stays editable. A void is refused when a succeeded payment exists (untrusted
 --     roles) and, for everyone, while a claim is submitted / accepted / part_paid / paid.
 create function invoices_guard() returns trigger language plpgsql set search_path = public, pg_temp as $$
-declare api boolean := not (current_user in ('postgres','supabase_admin') or coalesce((select rolsuper from pg_roles where rolname = current_user), false));
+declare api boolean := not _trusted_writer(tg_relid);
 begin
   if tg_op = 'INSERT' then
     if api and new.status <> 'draft' then raise exception 'invoice_must_start_as_draft'; end if;
@@ -96,7 +118,7 @@ begin
     if new.total_cents = 0 then raise exception 'zero_total'; end if;
     if new.scheme_portion_cents + new.patient_portion_cents <> new.total_cents then raise exception 'portions_mismatch'; end if;
     if new.payer_type = 'self' and new.scheme_portion_cents <> 0 then raise exception 'self_pay_has_scheme_portion'; end if;
-    if tg_op = 'UPDATE' then new.issue_date := current_date; end if;
+    if tg_op = 'UPDATE' then new.issue_date := sa_today(); end if;
   end if;
   return new; end $$;
 create trigger trg_invoices_guard before insert or update on invoices for each row execute function invoices_guard();
@@ -181,29 +203,35 @@ create trigger trg_claim_events_append_only before update or delete on claim_eve
 create trigger trg_claim_payments_append_only before update or delete on claim_payments for each row execute function append_only_guard();
 
 -- Internal. The one place a payment row is created. Not executable by any API role; only the public wrappers call it.
--- An existing gateway_ref is never silently accepted for a user session ('duplicate_ref'). Only the service-role path
--- (p_replay_ok, the PayFast ITN route, which is retried by the gateway) treats the same ref for the same invoice, amount and
--- method as a replay and returns the existing id; anything else with that ref is 'ref_conflict'.
--- The invoice is locked before the lookup, so a concurrent duplicate waits for the first insert and then finds it
--- (the unique_violation handler covers a duplicate that still slips through, e.g. the same ref on another invoice).
-create function _record_payment(p_invoice uuid, p_method text, p_amount int, p_ref text, p_by uuid, p_received_on date, p_replay_ok boolean) returns uuid
+--   * payfast / medical_aid: the reference goes to gateway_ref (globally unique). Only the service-role path (p_replay_ok, the
+--     PayFast ITN route, which the gateway retries) treats the same ref for the same invoice, amount and method as a replay and
+--     returns the existing id; anything else with that ref is 'ref_conflict' (or 'duplicate_ref' when replays are not allowed).
+--   * manual methods: the reference goes to reference (not unique). Double-submit protection instead: the same invoice, method,
+--     amount, reference and received_on is 'possible_duplicate' unless p_allow_duplicate.
+-- The invoice is locked before any lookup, so a concurrent duplicate waits for the first insert and then finds it
+-- (the unique_violation handler covers a gateway duplicate that still slips through, e.g. the same ref on another invoice).
+create function _record_payment(p_invoice uuid, p_method text, p_amount int, p_ref text, p_by uuid, p_received_on date,
+                                p_replay_ok boolean, p_allow_duplicate boolean) returns uuid
 language plpgsql security definer set search_path = public, pg_temp as $$
-declare pid uuid; ex payments;
+declare pid uuid; ex payments; gw boolean := p_method in ('payfast','medical_aid');
 begin
   if p_amount is null or p_amount <= 0 then raise exception 'invalid_amount'; end if;
   perform 1 from invoices where id = p_invoice for update;
   if not found then raise exception 'unknown_invoice'; end if;
-  if p_ref is not null then
+  if gw then
     select * into ex from payments where gateway_ref = p_ref;
     if found then
       if not p_replay_ok then raise exception 'duplicate_ref'; end if;
       if ex.invoice_id = p_invoice and ex.amount_cents = p_amount and ex.method = p_method then return ex.id; end if;
       raise exception 'ref_conflict';
     end if;
+  elsif not p_allow_duplicate and exists (select 1 from payments where invoice_id = p_invoice and method = p_method and amount_cents = p_amount
+                                          and reference is not distinct from p_ref and received_on = p_received_on) then
+    raise exception 'possible_duplicate';
   end if;
   begin
-    insert into payments(invoice_id,method,gateway_ref,amount_cents,received_on,recorded_by)
-    values (p_invoice,p_method,p_ref,p_amount,p_received_on,p_by) returning id into pid;
+    insert into payments(invoice_id,method,gateway_ref,reference,amount_cents,received_on,recorded_by)
+    values (p_invoice, p_method, case when gw then p_ref end, case when not gw then p_ref end, p_amount, p_received_on, p_by) returning id into pid;
   exception when unique_violation then
     select * into ex from payments where gateway_ref = p_ref;
     if not p_replay_ok then raise exception 'duplicate_ref'; end if;
@@ -215,11 +243,13 @@ begin
   return pid; end $$;
 
 -- User session: psychologist/admin recording a manual payment (eft, cash, card machine); recorded_by is the caller, p_by ignored.
--- eft and card_machine must carry a reference (cash may not); received_on may be back-dated but never in the future.
--- No user session (service role, the PayFast ITN route): payfast only, with the gateway reference.
-create function record_payment(p_invoice uuid, p_method text, p_amount int, p_ref text, p_by uuid, p_received_on date default current_date) returns uuid
+-- eft and card_machine must carry a reference (cash may); received_on may be back-dated but never in the future (SA date).
+-- Service role (JWT role 'service_role', i.e. the PayFast ITN route) or a trusted connection: payfast only, with the gateway
+-- reference. Any other session without a user (e.g. a custom login role with no JWT) is refused.
+create function record_payment(p_invoice uuid, p_method text, p_amount int, p_ref text, p_by uuid, p_received_on date default sa_today(),
+                               p_allow_duplicate boolean default false) returns uuid
 language plpgsql security definer set search_path = public, pg_temp as $$
-declare v_by uuid; v_on date := coalesce(p_received_on, current_date);
+declare v_by uuid; v_on date := coalesce(p_received_on, sa_today()); v_service boolean := false;
 begin
   p_ref := nullif(btrim(p_ref), '');
   if auth.uid() is not null then
@@ -228,12 +258,13 @@ begin
     if p_method in ('eft','card_machine') and p_ref is null then raise exception 'ref_required'; end if;
     v_by := auth.uid();
   else
+    if not (_jwt_role() = 'service_role' or _caller_trusted()) then raise exception 'forbidden'; end if;
     if p_method is distinct from 'payfast' then raise exception 'invalid_method'; end if;
     if p_ref is null then raise exception 'ref_required'; end if;
-    v_by := p_by;
+    v_by := p_by; v_service := true; p_allow_duplicate := false;
   end if;
-  if v_on > current_date then raise exception 'future_date'; end if;
-  return _record_payment(p_invoice, p_method, p_amount, p_ref, v_by, v_on, auth.uid() is null); end $$;
+  if v_on > sa_today() then raise exception 'future_date'; end if;
+  return _record_payment(p_invoice, p_method, p_amount, p_ref, v_by, v_on, v_service, p_allow_duplicate); end $$;
 
 -- ---- credit notes ---------------------------------------------------------------------------------------------------------
 -- Psychologist-only insert (RLS), validated here: only issued / part_paid invoices, never more than is outstanding.
@@ -281,7 +312,7 @@ create trigger trg_mam_guard before update on medical_aid_members for each row e
 --   * ICD-10 codes must exist in icd10_codes and only the psychologist may write them (admin manages the rest of the claim).
 --   * A rejection needs a reason (every role).
 create function claims_guard() returns trigger language plpgsql set search_path = public, pg_temp as $$
-declare api boolean := not (current_user in ('postgres','supabase_admin') or coalesce((select rolsuper from pg_roles where rolname = current_user), false));
+declare api boolean := not _trusted_writer(tg_relid);
         inv invoices; v_patient uuid; v_others int;
 begin
   if api then
@@ -353,18 +384,21 @@ create trigger trg_claims_events after insert or update on claims for each row e
 -- row, no status change), even after the claim is fully paid.
 create function record_scheme_remittance(p_claim uuid, p_amount int, p_ref text) returns void
 language plpgsql security definer set search_path = public, pg_temp as $$
-declare c claims; ex payments; pid uuid; got int; v_inv uuid; v_status text;
+declare c claims; ex payments; pid uuid; got int; v_status text;
 begin
-  if auth.uid() is not null and coalesce(auth_role()::text, '') not in ('psychologist','admin') then raise exception 'forbidden'; end if;
+  if auth.uid() is not null then
+    if coalesce(auth_role()::text, '') not in ('psychologist','admin') then raise exception 'forbidden'; end if;
+  elsif not (_jwt_role() = 'service_role' or _caller_trusted()) then
+    raise exception 'forbidden'; -- no user and not the service role
+  end if;
   p_ref := nullif(btrim(p_ref), '');
   if p_ref is null then raise exception 'ref_required'; end if;
   if p_amount is null or p_amount <= 0 then raise exception 'invalid_amount'; end if;
-  select invoice_id into v_inv from claims where id = p_claim;
-  if not found then raise exception 'unknown_claim'; end if;
-  -- lock order is always invoice, then claim (claims_guard does the same), and the invoice lock comes before the replay
-  -- check so two concurrent submissions of one ref serialise: the second sees the first and returns as a replay
-  perform 1 from invoices where id = v_inv for update;
+  -- lock order is always claim, then invoice (an UPDATE on claims has the claim row locked before claims_guard locks the invoice),
+  -- and both locks come before the replay check, so two concurrent submissions of one ref serialise: the second sees the first
   select * into c from claims where id = p_claim for update;
+  if not found then raise exception 'unknown_claim'; end if;
+  perform 1 from invoices where id = c.invoice_id for update;
   select * into ex from payments where gateway_ref = p_ref;
   if found then
     if exists (select 1 from claim_payments where claim_id = p_claim and payment_id = ex.id) and ex.amount_cents = p_amount then return; end if;
@@ -373,7 +407,7 @@ begin
   if c.status not in ('submitted','accepted','part_paid') then raise exception 'claim_not_payable'; end if;
   select coalesce(sum(amount_cents),0) into got from claim_payments where claim_id = p_claim;
   if got + p_amount > c.claimed_cents then raise exception 'remittance_exceeds_claim'; end if;
-  pid := _record_payment(c.invoice_id, 'medical_aid', p_amount, p_ref, auth.uid(), current_date, false);
+  pid := _record_payment(c.invoice_id, 'medical_aid', p_amount, p_ref, auth.uid(), sa_today(), false, false);
   insert into claim_payments(claim_id,payment_id,amount_cents) values (p_claim, pid, p_amount);
   got := got + p_amount;
   v_status := case when got >= c.claimed_cents then 'paid' else 'part_paid' end;
@@ -388,7 +422,7 @@ begin
 create function can_access_billing(p_patient uuid) returns boolean language sql stable security definer set search_path = public, pg_temp as
 $$ select exists (select 1 from patients where id = p_patient and user_id = auth.uid())
        or exists (select 1 from guardianships where patient_id = p_patient and guardian_user_id = auth.uid()
-                  and valid_from <= current_date and (valid_to is null or valid_to >= current_date)
+                  and valid_from <= sa_today() and (valid_to is null or valid_to >= sa_today())
                   and permissions ->> 'pay' = 'true') $$;
 
 -- ---- RLS ---------------------------------------------------------------------------------------------------------------------
@@ -444,14 +478,14 @@ revoke insert on credit_notes from service_role; -- psychologist-only, through a
 -- function privileges (ruling R4). Public entry points: callable by signed-in users and the service role. Internal and trigger
 -- functions: callable by nobody through the API (they run as the owner from the triggers and the functions above).
 revoke execute on function invoice_paid_cents(uuid) from public, anon;
-revoke execute on function record_payment(uuid, text, int, text, uuid, date) from public, anon;
-grant execute on function record_payment(uuid, text, int, text, uuid, date) to authenticated, service_role;
+revoke execute on function record_payment(uuid, text, int, text, uuid, date, boolean) from public, anon;
+grant execute on function record_payment(uuid, text, int, text, uuid, date, boolean) to authenticated, service_role;
 revoke execute on function can_access_billing(uuid) from public, anon;
 grant execute on function can_access_billing(uuid) to authenticated, service_role;
 revoke execute on function invoices_after() from public, anon, authenticated, service_role;
 revoke execute on function record_scheme_remittance(uuid, int, text) from public, anon;
 grant execute on function record_scheme_remittance(uuid, int, text) to authenticated, service_role;
-revoke execute on function _record_payment(uuid, text, int, text, uuid, date, boolean) from public, anon, authenticated, service_role;
+revoke execute on function _record_payment(uuid, text, int, text, uuid, date, boolean, boolean) from public, anon, authenticated, service_role;
 revoke execute on function invoice_recompute(uuid) from public, anon, authenticated, service_role;
 revoke execute on function invoice_lines_guard() from public, anon, authenticated, service_role;
 revoke execute on function payments_guard() from public, anon, authenticated, service_role;

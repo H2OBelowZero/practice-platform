@@ -39,9 +39,9 @@ export const as = (c: Client, u: string, sql: string, params: unknown[] = []) =>
 
 let refSeq = 0;
 /** manual payment through the public function; eft / card_machine need a reference, so one is made up unless given */
-export const pay = (c: Client, u: string, i: string, method: string, amount: number, ref: string | null = null, on: string | null = null) =>
-  as(c, u, "select record_payment($1,$2,$3,$4,null,coalesce($5::date, current_date)) id",
-    [i, method, amount, ref ?? (method === "cash" ? null : `AUTO-${++refSeq}`), on]);
+export const pay = (c: Client, u: string, i: string, method: string, amount: number, ref: string | null = null, on: string | null = null, allowDup = false) =>
+  as(c, u, "select record_payment($1,$2,$3,$4,null,coalesce($5::date, (now() at time zone 'Africa/Johannesburg')::date),$6) id",
+    [i, method, amount, ref ?? (method === "cash" ? null : `AUTO-${++refSeq}`), on, allowDup]);
 
 export async function guardianWith(c: Client, patient: string, permissions: string, validTo: string | null = null) {
   const g = await mkUser(c, "guardian");
