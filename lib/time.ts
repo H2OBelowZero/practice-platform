@@ -49,3 +49,18 @@ export function dayWindowUtc(date: string): { from: string; to: string } {
   const start = Date.parse(`${date}T00:00:00Z`) - SAST_MS;
   return { from: new Date(start - DAY_MS).toISOString(), to: new Date(start + 2 * DAY_MS).toISOString() };
 }
+
+/** The instant for a SAST wall-clock date ("YYYY-MM-DD") and time ("HH:MM"), as a canonical ISO string; null when either is malformed. */
+export function sastInstant(date: string, hhmm: string): string | null {
+  if (!isRealDate(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(hhmm)) return null;
+  return new Date(Date.parse(`${date}T${hhmm}:00Z`) - SAST_MS).toISOString();
+}
+
+/** The instant of SAST midnight at the start of `date`. */
+export const sastMidnight = (date: string): string => new Date(Date.parse(`${date}T00:00:00Z`) - SAST_MS).toISOString();
+
+/** "Mon 6 Jan" (or "Mon 6 Jan 2031" with `year`) for a YYYY-MM-DD date. */
+export function sastDayShort(date: string, year = false): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  return `${WEEKDAYS[d.getUTCDay()].slice(0, 3)} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()].slice(0, 3)}${year ? ` ${d.getUTCFullYear()}` : ""}`;
+}
