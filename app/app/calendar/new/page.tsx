@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth/session";
+import { cleanSearch } from "@/lib/patients/search";
 import { realDateParam } from "@/lib/booking/input";
 import { durationLabel, formatLabel } from "@/lib/booking/labels";
 import { formatZar } from "@/lib/money";
@@ -17,9 +18,6 @@ import { createAppointment } from "../actions";
 export const metadata = { title: "New appointment" };
 
 type PatientRow = { id: string; first_name: string; last_name: string; status: string };
-
-/** Characters that mean something in a PostgREST filter or an ILIKE pattern are dropped from the search text. */
-const cleanSearch = (q: string) => q.replace(/[%_*,()\\"'.:]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
 
 /** Staff book an appointment for a patient: find the patient (names only, through the staff user's own RLS), pick a session and any time. */
 export default async function NewAppointmentPage({ searchParams }: { searchParams: Promise<{ patient?: string; q?: string; date?: string }> }) {
