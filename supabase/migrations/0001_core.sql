@@ -42,11 +42,11 @@ create table audit_log (
   id bigserial primary key, actor_id uuid, role text, action text not null,
   entity text, entity_id uuid, detail jsonb, at timestamptz not null default now());
 
-create function auth_role() returns role_t language sql stable security definer set search_path=public as
+create function auth_role() returns role_t language sql stable security definer set search_path = public, pg_temp as
 $$ select role from profiles where user_id = auth.uid() $$;
-create function is_staff() returns boolean language sql stable security definer set search_path=public as
+create function is_staff() returns boolean language sql stable security definer set search_path = public, pg_temp as
 $$ select coalesce(auth_role() in ('psychologist','admin','bookkeeper','associate'), false) $$;
-create function my_patient_ids() returns setof uuid language sql stable security definer set search_path=public as
+create function my_patient_ids() returns setof uuid language sql stable security definer set search_path = public, pg_temp as
 $$ select id from patients where user_id = auth.uid()
    union select patient_id from guardianships
      where guardian_user_id = auth.uid() and valid_from <= current_date and (valid_to is null or valid_to >= current_date) $$;
@@ -66,12 +66,33 @@ create policy patients_own on patients for select to authenticated using (id in 
 create policy patients_own_update on patients for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy guardianship_read on guardianships for select to authenticated using (guardian_user_id = auth.uid() or auth_role() in ('psychologist','admin'));
 create policy audit_read on audit_log for select to authenticated using (auth_role() = 'psychologist');
-create policy audit_insert on audit_log for insert to authenticated with check (actor_id = auth.uid());
--- no update/delete policies: audit_log is append-only
-revoke update, delete on audit_log from authenticated, anon;
+-- audit_log is append-only and insert-only through audit_write(): no insert/update/delete policies,
+-- privileges revoked for every API role, and a trigger blocks even the owner.
+revoke insert, update, delete, truncate on audit_log from anon, authenticated;
+revoke update, delete, truncate on audit_log from service_role;
+create function audit_log_guard() returns trigger language plpgsql as
+$$ begin raise exception 'audit_log is append-only'; end $$;
+create trigger audit_log_no_row_change before update or delete on audit_log
+  for each row execute function audit_log_guard();
+create trigger audit_log_no_truncate before truncate on audit_log
+  for each statement execute function audit_log_guard();
+
+-- patients may edit their own contact details, never protected columns (staff and service role may)
+create function patients_guard() returns trigger language plpgsql as
+$$ begin
+  if auth.uid() is not null and coalesce(auth_role()::text, '') not in ('psychologist','admin') and (
+       new.id is distinct from old.id or new.user_id is distinct from old.user_id
+    or new.patient_number is distinct from old.patient_number or new.status is distinct from old.status
+    or new.payer is distinct from old.payer or new.is_minor is distinct from old.is_minor
+    or new.created_at is distinct from old.created_at) then
+    raise exception 'protected patient columns can only be changed by staff';
+  end if;
+  return new;
+end $$;
+create trigger patients_protect before update on patients for each row execute function patients_guard();
 
 create function audit_write(p_action text, p_entity text, p_entity_id uuid, p_detail jsonb default null) returns void
-language sql security definer set search_path=public as
+language sql security definer set search_path = public, pg_temp as
 $$ insert into audit_log(actor_id,role,action,entity,entity_id,detail) values (auth.uid(), auth_role()::text, p_action, p_entity, p_entity_id, p_detail) $$;
 
 -- security definer functions: not callable by public/anon (ruling R4)

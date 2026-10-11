@@ -17,26 +17,26 @@ export default async function setup() {
   const dir = mkdtempSync(join(tmpdir(), "pp-pg-"));
   const port = await freePort();
   const pg = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "postgres", port, persistent: false, onLog: () => {}, onError: () => {} });
-  await pg.initialise();
-  await pg.start();
-  await pg.createDatabase("test");
-
-  const c = new Client({ host: "localhost", port, user: "postgres", password: "postgres", database: "test" });
-  await c.connect();
+  const cleanup = async () => { await pg.stop().catch(() => {}); rmSync(dir, { recursive: true, force: true }); };
   try {
-    const files = [
-      join(root, "test_bootstrap.sql"),
-      ...readdirSync(join(root, "migrations")).filter((f) => f.endsWith(".sql")).sort().map((f) => join(root, "migrations", f)),
-    ];
-    for (const f of files) {
-      try { await c.query(readFileSync(f, "utf8")); }
-      catch (e) { throw new Error(`applying ${f}: ${(e as Error).message}`); }
-    }
-  } finally { await c.end(); }
+    await pg.initialise();
+    await pg.start();
+    await pg.createDatabase("test");
+
+    const c = new Client({ host: "localhost", port, user: "postgres", password: "postgres", database: "test" });
+    await c.connect();
+    try {
+      const files = [
+        join(root, "test_bootstrap.sql"),
+        ...readdirSync(join(root, "migrations")).filter((f) => f.endsWith(".sql")).sort().map((f) => join(root, "migrations", f)),
+      ];
+      for (const f of files) {
+        try { await c.query(readFileSync(f, "utf8")); }
+        catch (e) { throw new Error(`applying ${f}: ${(e as Error).message}`); }
+      }
+    } finally { await c.end(); }
+  } catch (e) { await cleanup(); throw e; }
 
   process.env.DATABASE_URL_TEST = `postgres://postgres:postgres@localhost:${port}/test`;
-  return async () => {
-    await pg.stop();
-    rmSync(dir, { recursive: true, force: true });
-  };
+  return cleanup;
 }

@@ -1,6 +1,8 @@
 // DB test harness. Tests run against a throwaway Postgres started by tests/db/global-setup.ts
 // (embedded-postgres, no Docker). It applies supabase/test_bootstrap.sql (Supabase stubs) and then every
 // supabase/migrations/*.sql in filename order, and exposes the URL as DATABASE_URL_TEST.
+// NOTE: every test runs in one rolled-back transaction, so DEFERRED constraints/triggers never fire and
+// now()/current_date are frozen; use `set constraints all immediate` where needed.
 // New migration? Just add the file; no other wiring needed. Every test runs in a transaction that is rolled back.
 import { Client } from "pg";
 
