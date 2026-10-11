@@ -1,5 +1,5 @@
 import type { Values } from "@/lib/appointments/types";
-import { LANGUAGES, PAYERS } from "@/lib/patients/input";
+import { LANGUAGES, PAYERS } from "@/lib/patients/options";
 import type { PatientRecord } from "@/lib/patients/record";
 import { Input, Select } from "@/components/ui/field";
 

@@ -1,14 +1,7 @@
 import { z } from "zod";
 import { isRealDate, sastDate } from "@/lib/time";
+import { LANGUAGES, PAYERS } from "./options";
 import { normaliseZaPhone } from "./phone";
-
-export const LANGUAGES = [
-  ["en", "English"], ["af", "Afrikaans"], ["zu", "isiZulu"], ["xh", "isiXhosa"], ["st", "Sesotho"], ["tn", "Setswana"],
-  ["nso", "Sepedi"], ["ts", "Xitsonga"], ["ss", "siSwati"], ["ve", "Tshivenda"], ["nr", "isiNdebele"], ["other", "Another language"],
-] as const;
-export const PAYERS = [["self", "Self-pay"], ["medical_aid", "Medical aid"], ["split", "Part self-pay, part medical aid"]] as const;
-export const PATIENT_STATUSES = ["prospect", "active", "archived"] as const;
-export type PatientStatus = (typeof PATIENT_STATUSES)[number];
 
 /** Empty strings from a form become undefined. */
 const blank = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);

@@ -17,6 +17,11 @@ npm run dev
 - `npm run test:db` - DB tests (`tests/db`) against a throwaway local Postgres (no Docker, no Supabase CLI)
 - `npm run test:e2e` - Playwright; needs a running Supabase (staging project), not run in CI
 
+## Seed data and form templates
+
+`supabase/seed.sql` (local and staging only) holds version 1 of the intake forms and consents. The wording is FICTIONAL / DRAFT and must be reviewed by the practice and a legal advisor before live use.
+The templates are written in `lib/forms/templates.ts`; after editing them run `UPDATE_SEED=1 npm run test:unit` to regenerate the block between the markers in `seed.sql` (a unit test fails if the two drift apart).
+
 ## Testing caveat
 
 DB tests stub Supabase's `auth` schema (roles, `auth.users`, `auth.uid()`), so Supabase Auth behaviour
