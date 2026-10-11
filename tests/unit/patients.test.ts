@@ -3,10 +3,11 @@ import { normaliseZaPhone, phoneVariants } from "@/lib/patients/phone";
 import { findDuplicates, normaliseName, type ExistingPatient, type PatientIdentity } from "@/lib/patients/duplicates";
 import { ageOn, isMinor, patientNo } from "@/lib/patients/age";
 import { cleanSearch, patientNumberQuery, wordFilter } from "@/lib/patients/search";
-import { adminSchema, createSchema, emergencyContact, fieldErrors, profileSchema } from "@/lib/patients/input";
-import { inviteBlock } from "@/lib/patients/invite";
+import { adminSchema, createSchema, emergencyContact, fieldErrors, invalidState, INVALID_SUMMARY, profileSchema } from "@/lib/patients/input";
 import { hrefWith, pageCount, pageRange, parseListStatus, parsePage } from "@/lib/patients/list";
 import { auditActionText, auditDetailText } from "@/lib/patients/audit-view";
+import { duplicateConfirmed, duplicateFingerprint } from "@/lib/patients/fingerprint";
+import { inviteBlock, inviteErrorText, invitationVoidedByEmailChange } from "@/lib/patients/invite";
 import { patientNotice } from "@/lib/patients/notices";
 
 describe("normaliseZaPhone", () => {
@@ -172,4 +173,63 @@ describe("audit and notices", () => {
     expect(auditDetailText(null)).toBe(""); expect(auditDetailText([1])).toBe("");
   });
   it("only known notice codes render", () => { expect(patientNotice("saved")).toBe("Changes saved."); expect(patientNotice("<b>")).toBeUndefined(); expect(patientNotice("constructor")).toBeUndefined(); });
+});
+
+describe("fix round 1", () => {
+  it("search: a number that leaves fewer than 3 digits after the 0/27 prefix adds no phone clause", () => {
+    for (const w of ["27", "+27", "0", "5", "12", "027", "+270"]) expect(wordFilter(w), w).not.toContain("phone.ilike");
+    expect(wordFilter("0821")).toContain("phone.ilike.%821%");
+    expect(wordFilter("+27821")).toContain("phone.ilike.%821%");
+    expect(wordFilter("555")).toContain("phone.ilike.%555%");
+    expect(wordFilter("jane")).toContain("phone.ilike.%jane%");
+    expect(wordFilter("27")).not.toContain("%%");
+  });
+
+  it("duplicate fingerprint: stable, order independent, different for a different set", () => {
+    const a = [{ id: "1" }, { id: "2" }];
+    expect(duplicateFingerprint(a)).toBe(duplicateFingerprint([{ id: "2" }, { id: "1" }, { id: "1" }]));
+    expect(duplicateFingerprint(a)).not.toBe(duplicateFingerprint([{ id: "1" }]));
+    expect(duplicateFingerprint(a)).not.toBe(duplicateFingerprint([{ id: "1" }, { id: "3" }]));
+    expect(duplicateFingerprint(a)).toMatch(/^[0-9a-f]{32}$/);
+  });
+  it("create anyway counts only when ticked, with the fingerprint of the matches found now", () => {
+    const shown = [{ id: "1" }], now = [{ id: "1" }, { id: "9" }];
+    const fp = duplicateFingerprint(shown);
+    expect(duplicateConfirmed(true, fp, shown)).toBe(true);
+    expect(duplicateConfirmed(false, fp, shown)).toBe(false);
+    expect(duplicateConfirmed(true, undefined, shown)).toBe(false);
+    expect(duplicateConfirmed(true, "", shown)).toBe(false);
+    expect(duplicateConfirmed(true, fp, now)).toBe(false); // a new match appeared since the warning
+    expect(duplicateConfirmed(true, fp, [])).toBe(false);
+  });
+
+  it("validation state: every failing field gets a message, with the typed values kept", () => {
+    const values = { ...full, first_name: "", email: "nope", phone: "12", date_of_birth: "2999-01-01" };
+    const r = profileSchema.safeParse(values);
+    expect(r.success).toBe(false);
+    const s = invalidState(r.error!, values);
+    expect(s.error).toBe(INVALID_SUMMARY);
+    expect(Object.keys(s.fieldErrors).sort()).toEqual(["date_of_birth", "email", "first_name", "phone"]);
+    expect(s.values).toBe(values);
+    const a = adminSchema.safeParse({ ...full, emergency_relationship: "Mum", referral_source: "x".repeat(300) });
+    expect(Object.keys(invalidState(a.error!, full).fieldErrors).sort()).toEqual(["emergency_name", "emergency_phone", "referral_source"]);
+  });
+
+  it("invite errors map to plain language", () => {
+    expect(inviteErrorText("invite_too_soon")).toBe("An invitation was sent a moment ago. Please wait 10 minutes before sending another.");
+    expect(inviteErrorText("... patient_minor ...")).toMatch(/guardian/);
+    expect(inviteErrorText("no_email")).toMatch(/email/);
+    expect(inviteErrorText("syntax error at or near")).toBe("We could not send the invitation. Please try again.");
+    expect(inviteErrorText(undefined)).toMatch(/could not/);
+  });
+
+  it("changing the email of an invited, unregistered patient voids the invitation", () => {
+    const invited = { user_id: null, portal_invited_at: "2030-01-01T10:00:00Z", email: "a@b.co" };
+    expect(invitationVoidedByEmailChange(invited, "new@b.co")).toBe(true);
+    expect(invitationVoidedByEmailChange(invited, null)).toBe(true);
+    expect(invitationVoidedByEmailChange(invited, "a@b.co")).toBe(false);
+    expect(invitationVoidedByEmailChange(invited, " A@B.co ")).toBe(false); // case and spaces do not matter to the account link
+    expect(invitationVoidedByEmailChange({ ...invited, user_id: "u" }, "new@b.co")).toBe(false);
+    expect(invitationVoidedByEmailChange({ ...invited, portal_invited_at: null }, "new@b.co")).toBe(false);
+  });
 });

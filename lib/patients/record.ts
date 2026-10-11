@@ -17,7 +17,7 @@ export type PatientRecord = {
 
 const LIST_COLUMNS = "id, patient_number, first_name, last_name, date_of_birth, email, phone, status";
 /** LIKE special characters in an email address (_ is common) are escaped so they match themselves. */
-const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+export const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 /**
  * Existing patients that look like `c`, read through the staff user's own client (RLS), archived ones included.

@@ -57,6 +57,13 @@ export const emergencyContact = (v: { emergency_name?: string; emergency_phone?:
 /** First message per field, for showing next to each input. */
 export function fieldErrors(error: { issues: { path: PropertyKey[]; message: string }[] }): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const i of error.issues) { const k = String(i.path[0] ?? "form"); if (!(k in out)) out[k] = i.message; }
+  for (const i of error.issues) { const k = String(i.path[0] ?? "form"); if (!Object.hasOwn(out, k)) out[k] = i.message; }
   return out;
+}
+
+export const INVALID_SUMMARY = "Please check the details marked below.";
+
+/** What a form action sends back after a validation failure: a summary, one message per field, and what was typed (to refill the form). */
+export function invalidState(error: { issues: { path: PropertyKey[]; message: string }[] }, values: Record<string, string>) {
+  return { error: INVALID_SUMMARY, fieldErrors: fieldErrors(error), values };
 }

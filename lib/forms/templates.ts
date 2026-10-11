@@ -10,6 +10,10 @@ import type { FormSchema } from "./validate";
  */
 export type SeedTemplate = { key: string; version: number; schema: FormSchema };
 
+/** Shown at the top of every consent, privacy, terms, telehealth and sharing form until the wording has been reviewed. */
+export const DRAFT_LINE = "Draft wording — to be reviewed by the practice and a legal advisor before live use.";
+const withDraft = (s: FormSchema): FormSchema => ({ ...s, intro: `${DRAFT_LINE}\n\n${s.intro ?? ""}`.trim() });
+
 const CRISIS = "If you are in crisis, call SADAG on 0800 567 567 or go to the nearest emergency room. This form is not monitored in real time.";
 
 const registration: FormSchema = {
@@ -166,11 +170,11 @@ const shareWithInsurer: FormSchema = {
 export const TEMPLATES: SeedTemplate[] = [
   { key: "registration", version: 1, schema: registration },
   { key: "medical_history", version: 1, schema: medicalHistory },
-  { key: "informed_consent", version: 1, schema: informedConsent },
-  { key: "privacy_notice", version: 1, schema: privacyNotice },
-  { key: "telehealth_consent", version: 1, schema: telehealthConsent },
-  { key: "financial_terms", version: 1, schema: financialTerms },
+  { key: "informed_consent", version: 1, schema: withDraft(informedConsent) },
+  { key: "privacy_notice", version: 1, schema: withDraft(privacyNotice) },
+  { key: "telehealth_consent", version: 1, schema: withDraft(telehealthConsent) },
+  { key: "financial_terms", version: 1, schema: withDraft(financialTerms) },
   { key: "guardian_info", version: 1, schema: guardianInfo },
-  { key: "share_with_referrer", version: 1, schema: shareWithReferrer },
-  { key: "share_with_insurer", version: 1, schema: shareWithInsurer },
+  { key: "share_with_referrer", version: 1, schema: withDraft(shareWithReferrer) },
+  { key: "share_with_insurer", version: 1, schema: withDraft(shareWithInsurer) },
 ];

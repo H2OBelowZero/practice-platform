@@ -2,8 +2,9 @@ import { ActionButton, ActionForm, FocusOnMount } from "@/components/ui/action-f
 import { LinkButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/field";
-import { adminValues, AdminFields } from "../fields";
-import { archivePatient, restorePatient, updateAdministrative } from "../actions";
+import { AdminForm } from "../edit-forms";
+import { adminValues } from "../fields";
+import { archivePatient, restorePatient } from "../actions";
 import type { TabContext } from "./tabs";
 
 /** Emergency contact, referral, payer, status, and archive / restore. There is no delete: a record is archived, never removed. */
@@ -15,9 +16,7 @@ export function AdministrativeTab({ patient, query }: TabContext) {
   return (
     <div className="grid max-w-3xl gap-6">
       <Card>
-        <ActionForm action={updateAdministrative} args={[patient.id]} submitLabel="Save changes" pendingLabel="Saving…">
-          <AdminFields v={adminValues(patient)} statusEditable={!archived} />
-        </ActionForm>
+        <AdminForm patientId={patient.id} initial={adminValues(patient)} statusEditable={!archived} />
       </Card>
 
       <Card>

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { TEMPLATES } from "@/lib/forms/templates";
+import { DRAFT_LINE, TEMPLATES } from "@/lib/forms/templates";
 import { buildSeedSql, buildTemplatesBlock, extractTemplatesBlock, replaceTemplatesBlock } from "@/lib/forms/seed-sql";
 import { CONSENT_PURPOSES, checkSchema, validateAnswers } from "@/lib/forms/validate";
 
@@ -36,6 +36,13 @@ describe("seeded form templates", () => {
     expect(purposeOf("share_with_referrer")).toBe("share_referrer");
     expect(purposeOf("share_with_insurer")).toBe("share_insurer");
     for (const k of ["registration", "medical_history", "guardian_info"]) expect(purposeOf(k)).toBeUndefined();
+  });
+
+  it("every consent, privacy, terms, telehealth and sharing form opens with the visible draft-wording line", () => {
+    const consent = TEMPLATES.filter((t) => t.schema.fields.some((f) => f.consentPurpose));
+    expect(consent.length).toBe(6);
+    for (const t of consent) expect(t.schema.intro?.startsWith(DRAFT_LINE), t.key).toBe(true);
+    expect(DRAFT_LINE).toBe("Draft wording — to be reviewed by the practice and a legal advisor before live use.");
   });
 
   it("an empty submission is refused where fields are required, and a complete one passes (required fields are answerable)", () => {

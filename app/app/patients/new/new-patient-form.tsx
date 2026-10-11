@@ -51,6 +51,7 @@ export function NewPatientForm() {
             </ul>
           </Notice>
           <div className="mb-6 flex items-start gap-3">
+            <input type="hidden" name="duplicateFingerprint" value={state?.fingerprint ?? ""} />
             <input id="confirmDuplicate" name="confirmDuplicate" type="checkbox" required className="mt-1 h-6 w-6 shrink-0 accent-sage-700" />
             <label htmlFor="confirmDuplicate" className="font-medium">
               Create anyway

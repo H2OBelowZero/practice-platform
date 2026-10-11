@@ -1,4 +1,5 @@
 import { it, expect } from "vitest";
+import { escapeLike } from "@/lib/patients/record";
 import { asUser, asService, mkUser, withClient } from "./helpers";
 
 // What app/app/patients/actions.ts relies on, checked against the real policies and triggers (no new migration needed).
@@ -35,7 +36,7 @@ it("the patient audit tab: only the psychologist reads rows by entity id, newest
 it("duplicate look-ups: escaped LIKE matches an email with an underscore only literally; phone spellings and date of birth find the row", () => withClient(async (c) => {
   await c.query("insert into patients(first_name,last_name,email,phone,date_of_birth) values ('A','B','jo_hn@x.test','0821234567','1990-05-01'), ('C','D','joXhn@x.test','+27835550000',null)");
   const emails = async (pattern: string) => (await c.query("select email from patients where email ilike $1", [pattern])).rows.map((r) => r.email as string).sort();
-  expect(await emails("jo\\_hn@x.test")).toEqual(["jo_hn@x.test"]); // escapeLike output
+  expect(await emails(escapeLike("jo_hn@x.test"))).toEqual(["jo_hn@x.test"]); // the real escapeLike helper
   expect(await emails("jo_hn@x.test")).toEqual(["joXhn@x.test", "jo_hn@x.test"].sort()); // unescaped, the underscore would be a wildcard
   expect((await c.query("select 1 from patients where phone = any($1)", [["+27821234567", "0821234567", "27821234567"]])).rowCount).toBe(1);
   expect((await c.query("select 1 from patients where date_of_birth='1990-05-01'")).rowCount).toBe(1);

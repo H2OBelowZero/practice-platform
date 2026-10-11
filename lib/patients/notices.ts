@@ -2,6 +2,7 @@
 export const NOTICE_TEXT = {
   created: "The patient has been added.",
   saved: "Changes saved.",
+  saved_reinvite: "Changes saved. The email address changed, so the earlier portal invitation no longer applies. Invite the patient again when you are ready.",
   unchanged: "Nothing was changed.",
   archived: "The patient has been archived. Their record is kept.",
   restored: "The patient has been restored.",

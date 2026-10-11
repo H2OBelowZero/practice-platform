@@ -50,6 +50,8 @@ it("navigation is filtered by role", () => {
   expect(labels("admin")).not.toContain("Audit log");
   expect(labels("admin")).toContain("Patients");
   expect(labels("associate")).not.toContain("Billing");
+  expect(labels("associate")).not.toContain("Patients"); // those pages 404 for associates in Phase 1
+  expect(labels("associate")).not.toContain("Calendar");
   expect(staffPhoneNav("psychologist").map((i) => i.label)).toEqual(["Dashboard", "Calendar", "Patients", "Tasks", "More"]);
   expect(staffPhoneNav("bookkeeper").map((i) => i.label)).toEqual(["Billing", "Reports", "More"]);
   expect(portalNav().map((i) => i.label)).toEqual(["Home", "Appointments", "Documents", "Payments"]);

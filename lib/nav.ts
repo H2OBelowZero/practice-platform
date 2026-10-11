@@ -6,12 +6,13 @@ type Def = NavItem & { roles: Role[]; phone?: boolean };
 
 const CLINICAL_ADMIN: Role[] = ["psychologist", "admin", "associate"];
 
+// Calendar and Patients are psychologist/admin only (their pages 404 for everyone else; the associate UI is not exposed in Phase 1).
 // Navigation is a convenience, never the control: every page and action still calls requireRole (R26).
 // Clinical records are reached from a patient's page and only the psychologist may open them, so no admin/bookkeeper link points there.
 const STAFF: Def[] = [
   { href: "/app", label: "Dashboard", icon: "home", roles: CLINICAL_ADMIN, phone: true },
-  { href: "/app/calendar", label: "Calendar", icon: "calendar", roles: CLINICAL_ADMIN, phone: true },
-  { href: "/app/patients", label: "Patients", icon: "users", roles: CLINICAL_ADMIN, phone: true },
+  { href: "/app/calendar", label: "Calendar", icon: "calendar", roles: ["psychologist", "admin"], phone: true },
+  { href: "/app/patients", label: "Patients", icon: "users", roles: ["psychologist", "admin"], phone: true },
   { href: "/app/tasks", label: "Tasks", icon: "tasks", roles: CLINICAL_ADMIN, phone: true },
   { href: "/app/billing", label: "Billing", icon: "card", roles: ["psychologist", "admin", "bookkeeper"], phone: true },
   { href: "/app/claims", label: "Claims", icon: "doc", roles: ["psychologist", "admin"] },
