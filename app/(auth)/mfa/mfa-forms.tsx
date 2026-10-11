@@ -2,6 +2,7 @@
 
 import { useActionState, useRef, useEffect } from "react";
 import { startMfaEnrolment, verifyMfa, type FormState } from "../actions";
+import { Button } from "@/components/ui/button";
 import { Field, FormError, SubmitButton } from "../ui";
 
 function CodeForm({ factorId, next, state, action }: {
@@ -37,21 +38,20 @@ export function MfaEnrol({ next }: { next: string }) {
     return (
       <form action={enrol}>
         <FormError state={enrolState} />
-        <button type="submit" disabled={enrolPending}
-                className="min-h-11 w-full rounded bg-blue-800 px-4 py-2 font-medium text-white hover:bg-blue-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-800 disabled:opacity-70">
+        <Button type="submit" loading={enrolPending} className="w-full">
           {enrolPending ? "Preparing…" : "Set up authenticator app"}
-        </button>
+        </Button>
       </form>
     );
   }
   return (
     <>
-      <h2 ref={heading} tabIndex={-1} className="mb-2 text-lg font-semibold">Scan, then confirm</h2>
+      <h2 ref={heading} tabIndex={-1} className="mb-2">Scan, then confirm</h2>
       <ol className="mb-4 list-decimal space-y-2 pl-5">
         <li>In your authenticator app, add an account and scan this QR code.</li>
         <li>
           Cannot scan? Enter this key instead:{" "}
-          <code className="break-all rounded bg-neutral-200 px-1 py-0.5 text-black select-all">{info.secret}</code>
+          <code className="break-all rounded bg-sunk px-1.5 py-0.5 text-ink select-all">{info.secret}</code>
         </li>
         <li>Enter the 6-digit code the app shows.</li>
       </ol>

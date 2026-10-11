@@ -1,26 +1,110 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens. Direction: warm, calm, professional (spec section 3): soft sage, muted blue, warm white, neutral grey.
+ * Light theme only on purpose: the warm-white surface is part of the brand.
+ *
+ * Contrast (WCAG 2.x, computed): every text/background pair used by the components is AA (>= 4.5:1), large text and
+ * UI boundaries >= 3:1.
+ *   ink        #23292d on canvas #faf8f4 ... 13.9   on white ... 14.7
+ *   ink-muted  #5c6168 on canvas ........... 5.9   on sunk #f1eee7 ... 5.4   on white ... 6.2
+ *   white on sage-700 #3f5f4d (primary button) .. 7.1     white on sage-800 hover #344e3f ... 9.1
+ *   sage-700 text on canvas ................ 6.7
+ *   blue-700 #3d6189 (links, focus ring) on canvas ... 6.1   on white ... 6.4
+ *   danger #9b2c2c on canvas ............... 7.1   white on danger button ... 7.5
+ *   notice/chip text on its tint: success 7.3-7.6, info 7.1-7.3, warning 6.1-6.5, danger 7.4, neutral 6.9
+ *   sidebar: #e9f1ec on #2f4a3b ... 8.4, #c3d3c9 on #2f4a3b ... 6.2
+ *   input border #7d8388 on canvas ......... 3.6 (non-text contrast >= 3)
+ * The soft sage #7a9a86 and muted blue #5b7fa6 are brand/decoration colours only (2.9 and 3.9 on canvas): they never
+ * carry text. Text variants are the darker -700/-800 steps.
+ */
+@theme {
+  --color-canvas: #faf8f4;
+  --color-surface: #ffffff;
+  --color-sunk: #f1eee7;
+  --color-line: #ddd8cc;
+  --color-line-strong: #7d8388;
+  --color-ink: #23292d;
+  --color-ink-muted: #5c6168;
+
+  --color-sage-100: #e9f1ec;
+  --color-sage-200: #cfe0d6;
+  --color-sage-500: #7a9a86;
+  --color-sage-700: #3f5f4d;
+  --color-sage-800: #344e3f;
+  --color-sage-900: #2f4a3b;
+
+  --color-blue-100: #e3ecf5;
+  --color-blue-500: #5b7fa6;
+  --color-blue-700: #3d6189;
+  --color-blue-800: #2f4f73;
+
+  --color-danger: #9b2c2c;
+  --color-danger-strong: #8f2626;
+  --color-danger-tint: #fbeceb;
+  --color-warn-ink: #7a4f00;
+  --color-warn-tint: #f8ecd0;
+  --color-grey-ink: #4a4f55;
+  --color-grey-tint: #ecebe7;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+
+  --radius-card: 14px;
+  --shadow-card: 0 1px 2px rgb(35 41 45 / 0.05), 0 4px 16px rgb(35 41 45 / 0.04);
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+  --focus: var(--color-blue-700);
+  --focus-on-dark: #dbe8f4;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+/* Base element styles live in the base layer so Tailwind utilities (text-white on a link, etc.) can override them. */
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 1.0625rem; /* 17px: comfortable reading size, scales with the user's browser setting */
+    line-height: 1.6;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
   }
+
+  h1, h2, h3 { font-family: var(--font-serif); letter-spacing: -0.005em; line-height: 1.25; color: var(--color-ink); text-wrap: balance; }
+  h1 { font-size: 1.75rem; font-weight: 600; }
+  h2 { font-size: 1.3rem; font-weight: 600; }
+  h3 { font-size: 1.1rem; font-weight: 600; }
+  @media (min-width: 640px) { h1 { font-size: 2rem; } }
+  p { text-wrap: pretty; }
+
+  a { color: var(--color-blue-700); text-underline-offset: 3px; }
+  a:hover { color: var(--color-blue-800); }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Visible 3px focus ring on everything focusable (keyboard only, so mouse clicks stay quiet). */
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.on-dark :focus-visible { outline-color: var(--focus-on-dark); }
+/* Programmatically focused containers (error summaries) show the same ring. */
+[tabindex="-1"]:focus { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+::selection { background: var(--color-sage-200); color: var(--color-ink); }
+
+/* Respect reduced-motion: no transitions or animations, no smooth scrolling. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+/* Spinner used by loading buttons (text label stays; this is decoration, aria-busy carries the state). */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner { width: 1em; height: 1em; border-radius: 9999px; border: 2px solid currentColor; border-right-color: transparent; animation: spin 0.8s linear infinite; }
+
+/* Keep the phone bottom nav from covering content, including on devices with a home indicator. */
+.has-bottom-nav { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+@media (min-width: 1024px) { .has-bottom-nav { padding-bottom: 0; } }

@@ -3,10 +3,11 @@ import { homeFor, needsMfa } from "@/lib/auth/roles";
 import { safeNext } from "@/lib/auth/redirect";
 import { currentUser } from "@/lib/auth/session";
 import { supabaseServer } from "@/lib/supabase/server";
+import { Button } from "@/components/ui/button";
 import { signOut } from "../actions";
 import { MfaEnrol, MfaVerify } from "./mfa-forms";
 
-export const metadata = { title: "Two-step verification - Practice Platform" };
+export const metadata = { title: "Two-step verification" };
 
 export default async function MfaPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const sb = await supabaseServer();
@@ -22,20 +23,20 @@ export default async function MfaPage({ searchParams }: { searchParams: Promise<
   const factor = factors?.totp[0]; // verified TOTP factors only
   return (
     <>
-      <h1 className="mb-2 text-2xl font-semibold">Two-step verification</h1>
+      <h1 className="mb-3">Two-step verification</h1>
       {factor ? (
         <>
-          <p className="mb-4">Enter the 6-digit code from your authenticator app to continue.</p>
+          <p className="mb-5 text-ink-muted">Enter the 6-digit code from your authenticator app to continue.</p>
           <MfaVerify factorId={factor.id} next={dest} />
         </>
       ) : (
         <>
-          <p className="mb-4">Staff accounts need an authenticator app (such as Google Authenticator, Microsoft Authenticator or Authy). Set it up once, then enter a code each time you sign in.</p>
+          <p className="mb-5 text-ink-muted">Staff accounts need an authenticator app (such as Google Authenticator, Microsoft Authenticator or Authy). Set it up once, then enter a code each time you sign in.</p>
           <MfaEnrol next={dest} />
         </>
       )}
       <form action={signOut} className="mt-6">
-        <button type="submit" className="min-h-11 underline underline-offset-4">Sign out</button>
+        <Button type="submit" variant="quiet">Sign out</Button>
       </form>
     </>
   );
