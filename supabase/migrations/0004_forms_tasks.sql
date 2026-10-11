@@ -52,7 +52,6 @@ begin
     if not (v_staff and new.status = 'returned' and new.answers = old.answers
             and new.submitted_at is not distinct from old.submitted_at and new.submitted_by is not distinct from old.submitted_by) then
       raise exception 'submission is immutable'; end if;
-    perform audit_write('form.return', 'form_submissions', new.id);
     return new;
   end if;
   if not ((old.status, new.status) in (('draft','draft'),('draft','submitted'),('returned','returned'),('returned','submitted'))) then
@@ -63,9 +62,13 @@ begin
   return new; end $$;
 create trigger trg_fs_guard before insert or update on form_submissions for each row execute function fs_guard();
 
--- snapshot + audit on every transition to 'submitted' (after the row exists, so the snapshot's FK holds)
+-- snapshot + audit on every transition to 'submitted' (after the row exists, so the snapshot's FK holds).
+-- The 'form.return' audit lives here too: fs_guard runs as the invoker, who may no longer call audit_write (R25).
 create function fs_after() returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
 begin
+  if tg_op = 'UPDATE' and old.status = 'submitted' and new.status = 'returned' then
+    perform audit_write('form.return', 'form_submissions', new.id);
+  end if;
   if new.status = 'submitted' and (tg_op = 'INSERT' or old.status is distinct from 'submitted') then
     insert into form_submission_versions(submission_id,event,answers,template_version,actor)
     values (new.id, 'submitted', new.answers, new.template_version, auth.uid());

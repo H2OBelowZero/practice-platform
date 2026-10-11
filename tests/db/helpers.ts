@@ -43,6 +43,9 @@ export async function mkUser(c: Client, role: string, name = role) {
   const { rows } = await c.query(
     "insert into auth.users(id,email,instance_id,aud,role) values (gen_random_uuid(), $1||'@t.test', '00000000-0000-0000-0000-000000000000','authenticated','authenticated') returning id",
     [name + Math.random().toString(36).slice(2)]);
-  await c.query("insert into profiles(user_id,role,display_name) values ($1,$2,$3)", [rows[0].id, role, name]);
+  // the signup trigger (0006) already created a 'patient' profile for this user: upsert the wanted role (R8)
+  await c.query(
+    "insert into profiles(user_id,role,display_name) values ($1,$2,$3) on conflict (user_id) do update set role=excluded.role, display_name=excluded.display_name",
+    [rows[0].id, role, name]);
   return rows[0].id as string;
 }
