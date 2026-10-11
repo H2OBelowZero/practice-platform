@@ -30,12 +30,17 @@ it("claim creation: invoice must be medical_aid/split, member must be the invoic
   const split = await mkInvoice(c, p1, { total: 1000, scheme: 500, payer: "split" });
   expect((await ins(adm, split, m, 500)).rowCount).toBe(1); // admin may manage claims; split is claimable
   await expect(ins(adm, split, m, 501)).rejects.toThrow(/claim_exceeds_scheme_portion/);
+  // the invoice must be issued or part_paid
+  for (const st of ["draft", "void", "paid"]) {
+    const inv = (await c.query("insert into invoices(patient_id,total_cents,scheme_portion_cents,patient_portion_cents,payer_type,status) values ($1,1000,500,500,'medical_aid',$2) returning id", [p1, st])).rows[0].id;
+    await expect(ins(psy, inv, m, 100), st).rejects.toThrow(/invoice_not_claimable/);
+  }
   // a service-role caller is held to the same rules
   await expect(asService(c, () => c.query("insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,81000)", [i, m]))).rejects.toThrow(/claim_exceeds_scheme_portion/);
 }));
 
 it("claim identity is frozen; the amount only changes while draft; system columns are not writable", () => withClient(async (c) => {
-  const { psy, claim, p1, m } = await setup(c);
+  const { psy, claim, p1 } = await setup(c);
   const other = await mkInvoice(c, p1, { total: 1000, scheme: 500, payer: "split" });
   await expect(as(c, psy, "update claims set invoice_id=$2 where id=$1", [claim, other])).rejects.toThrow(/claim_link_frozen/);
   await expect(as(c, psy, "update claims set id=gen_random_uuid() where id=$1", [claim])).rejects.toThrow(/claim_link_frozen/);
@@ -46,7 +51,16 @@ it("claim identity is frozen; the amount only changes while draft; system column
   expect(r).toEqual({ reconciled_at: null, submitted_at: null, claimed_cents: 70000 });
   await setStatus(c, psy, claim, "submitted");
   await expect(as(c, psy, "update claims set claimed_cents=1 where id=$1", [claim])).rejects.toThrow(/claim_amount_frozen/);
-  expect(m).toBeTruthy();
+  await expect(as(c, psy, "update claims set icd10_codes='{F32.9}' where id=$1", [claim])).rejects.toThrow(/claim_frozen/);
+  await expect(as(c, psy, "update claims set tariff_code='other' where id=$1", [claim])).rejects.toThrow(/claim_frozen/);
+  const m2 = (await c.query("insert into medical_aid_members(patient_id,scheme,member_number) values ($1,'B','2') returning id", [p1])).rows[0].id;
+  await expect(as(c, psy, "update claims set member_id=$2 where id=$1", [claim, m2])).rejects.toThrow(/claim_link_frozen/);
+  await as(c, psy, "update claims set preauth_ref='PA2', claim_ref='C2' where id=$1", [claim]); // references stay editable
+  // back through rejected -> draft the fields unlock again
+  await setStatus(c, psy, claim, "rejected", ", rejection_reason='x'");
+  await expect(as(c, psy, "update claims set tariff_code='other' where id=$1", [claim])).rejects.toThrow(/claim_frozen/);
+  await setStatus(c, psy, claim, "draft");
+  await as(c, psy, "update claims set tariff_code='other', icd10_codes='{F32.9}', claimed_cents=60000 where id=$1", [claim]);
 }));
 
 // ---- status machine --------------------------------------------------------------------------------------------------
@@ -108,16 +122,6 @@ it("claims are never deleted", () => withClient(async (c) => {
   await expect(c.query("delete from claims where id=$1", [claim])).rejects.toThrow(/claims cannot be deleted/);
 }));
 
-it("a draft invoice cannot be edited out from under its claims", () => withClient(async (c) => {
-  const s = await seed(c);
-  const d = (await c.query("insert into invoices(patient_id,total_cents,scheme_portion_cents,patient_portion_cents,payer_type) values ($1,100,80,20,'medical_aid') returning id", [s.p1])).rows[0].id;
-  const m = (await c.query("insert into medical_aid_members(patient_id,scheme,member_number) values ($1,'D','1') returning id", [s.p1])).rows[0].id;
-  await as(c, s.psy, "insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,80)", [d, m]);
-  await expect(as(c, s.psy, "update invoices set scheme_portion_cents=10, patient_portion_cents=90 where id=$1", [d])).rejects.toThrow(/invoice_has_claims/);
-  await expect(as(c, s.psy, "update invoices set payer_type='self', scheme_portion_cents=0, patient_portion_cents=100 where id=$1", [d])).rejects.toThrow(/invoice_has_claims/);
-  await as(c, s.psy, "update invoices set total_cents=200, patient_portion_cents=120 where id=$1", [d]);
-}));
-
 // ---- claim_events ----------------------------------------------------------------------------------------------------
 it("claim_events: written by trigger with actor and from/to status; append-only; staff only", () => withClient(async (c) => {
   const { psy, adm, bk, u1, claim } = await setup(c);
@@ -160,6 +164,61 @@ it("submitting or accepting a claim never changes the invoice status or paid amo
   await setStatus(c, psy, c2, "accepted");
   expect(await status(c, j.i)).toBe("issued");
   expect(await paid(c, j.i)).toBe(0);
+}));
+
+// ---- cumulative cap, invoice state ----------------------------------------------------------------------------------
+it("claims on one invoice may not add up to more than its scheme portion; rejected claims do not count", () => withClient(async (c) => {
+  const { psy, p1 } = await seed(c);
+  const { i, m } = await mkMaInvoice(c, p1); // scheme portion 80 000
+  const mk = async (amt: number) => (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,$3) returning id", [i, m, amt])).rows[0].id as string;
+  const a = await mk(50000), b = await mk(30000);
+  await expect(mk(1)).rejects.toThrow(/claims_exceed_scheme_portion/);
+  await expect(as(c, psy, "update claims set claimed_cents=30001 where id=$1", [b])).rejects.toThrow(/claims_exceed_scheme_portion/);
+  await setStatus(c, psy, a, "submitted");
+  await setStatus(c, psy, a, "rejected", ", rejection_reason='x'");
+  const d = await mk(50000); // the rejected sibling no longer counts
+  await expect(mk(1)).rejects.toThrow(/claims_exceed_scheme_portion/);
+  await expect(setStatus(c, psy, a, "draft")).rejects.toThrow(/claims_exceed_scheme_portion/); // bringing it back would exceed
+  await expect(setStatus(c, psy, a, "submitted")).rejects.toThrow(/claims_exceed_scheme_portion/);
+  await setStatus(c, psy, d, "submitted");
+  await setStatus(c, psy, d, "rejected", ", rejection_reason='y'");
+  await setStatus(c, psy, a, "draft"); // room again
+  expect(await cs(c, a)).toBe("draft");
+}));
+
+it("a claim cannot be updated once its invoice is no longer issued / part_paid", () => withClient(async (c) => {
+  const { psy, i, claim } = await setup(c);
+  await c.query("update invoices set status='paid' where id=$1", [i]); // owner forces it
+  await expect(as(c, psy, "update claims set preauth_ref='x' where id=$1", [claim])).rejects.toThrow(/invoice_not_claimable/);
+  await expect(setStatus(c, psy, claim, "submitted")).rejects.toThrow(/invoice_not_claimable/);
+}));
+
+it("voiding an invoice is refused while any claim is submitted / accepted / part_paid / paid; a draft or rejected claim does not block", () => withClient(async (c) => {
+  const { psy, p1 } = await seed(c);
+  const mkClaim = async () => {
+    const { i, m } = await mkMaInvoice(c, p1);
+    return { i, cl: (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,1000) returning id", [i, m])).rows[0].id as string };
+  };
+  for (const st of ["submitted", "accepted"]) {
+    const { i, cl } = await mkClaim();
+    await setStatus(c, psy, cl, "submitted");
+    if (st === "accepted") await setStatus(c, psy, cl, "accepted");
+    await expect(as(c, psy, "update invoices set status='void' where id=$1", [i]), st).rejects.toThrow(/invoice_has_open_claims/);
+    expect(await status(c, i)).toBe("issued");
+  }
+  for (const st of ["part_paid", "paid"]) { // claim states only the remittance function sets: the owner stands in for it
+    const { i, cl } = await mkClaim();
+    await c.query("update claims set status=$2 where id=$1", [cl, st]);
+    await expect(c.query("update invoices set status='void' where id=$1", [i]), st).rejects.toThrow(/invoice_has_open_claims/);
+  }
+  const draft = await mkClaim();
+  await as(c, psy, "update invoices set status='void' where id=$1", [draft.i]);
+  expect(await status(c, draft.i)).toBe("void");
+  const rej = await mkClaim();
+  await setStatus(c, psy, rej.cl, "submitted");
+  await setStatus(c, psy, rej.cl, "rejected", ", rejection_reason='x'");
+  await as(c, psy, "update invoices set status='void' where id=$1", [rej.i]);
+  expect(await status(c, rej.i)).toBe("void");
 }));
 
 // ---- record_scheme_remittance --------------------------------------------------------------------------------------
@@ -281,6 +340,16 @@ it("claim_payments are append-only and written only by the remittance function",
   expect(await count(c, u1, "claim_payments")).toBe(0);
 }));
 
+it("one payment can back only one claim_payments row", () => withClient(async (c) => {
+  const { psy, p1, claim } = await setup(c);
+  await setStatus(c, psy, claim, "submitted");
+  await remit(c, psy, claim, 100, "R1");
+  const { i, m } = await mkMaInvoice(c, p1);
+  const c2 = (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,1000) returning id", [i, m])).rows[0].id;
+  await expect(c.query("insert into claim_payments(claim_id,payment_id,amount_cents) select $1, payment_id, 100 from claim_payments", [c2])).rejects.toThrow(/duplicate key/);
+  expect((await c.query("select 1 from claim_payments")).rowCount).toBe(1);
+}));
+
 // ---- claim_summary, claims, icd10_codes, members: role matrix --------------------------------------------------------
 it("claim_summary exposes only safe columns and only to psychologist, admin and bookkeeper", () => withClient(async (c) => {
   const { psy, adm, bk, assoc, u1, u2, g, gOld, claim } = await setup(c);
@@ -329,13 +398,28 @@ it("claims / claim_events / claim_payments / icd10_codes: bookkeeper and patient
   finally { await c.query("reset role"); }
 }));
 
-it("admin manages claims including ICD-10; psychologist too", () => withClient(async (c) => {
-  const { adm, psy, i, m } = await setup(c);
-  const id = (await as(c, adm, "insert into claims(invoice_id,member_id,claimed_cents,icd10_codes) values ($1,$2,1000,'{F32.9,F41.1}') returning id", [i, m])).rows[0].id;
-  expect((await as(c, adm, "select icd10_codes from claims where id=$1", [id])).rows[0].icd10_codes).toEqual(["F32.9", "F41.1"]);
-  await as(c, adm, "update claims set icd10_codes='{F43.2}' where id=$1", [id]);
-  expect((await as(c, psy, "select icd10_codes from claims where id=$1", [id])).rows[0].icd10_codes).toEqual(["F43.2"]);
+it("admin manages claims but cannot write ICD-10 codes (psychologist alone does); admin still reads them", () => withClient(async (c) => {
+  const { adm, psy, p1 } = await setup(c);
+  const { i, m } = await mkMaInvoice(c, p1);
+  await expect(as(c, adm, "insert into claims(invoice_id,member_id,claimed_cents,icd10_codes) values ($1,$2,1000,'{F32.9}')", [i, m])).rejects.toThrow(/forbidden/);
+  const id = (await as(c, adm, "insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,1000) returning id", [i, m])).rows[0].id;
+  await expect(as(c, adm, "update claims set icd10_codes='{F43.2}' where id=$1", [id])).rejects.toThrow(/forbidden/);
+  await as(c, adm, "update claims set claim_ref='C9', tariff_code='86205', claimed_cents=2000 where id=$1", [id]); // everything else is fine
+  await as(c, adm, "update claims set icd10_codes='{}' where id=$1", [id]); // unchanged is not a write
+  await as(c, psy, "update claims set icd10_codes='{F43.2}' where id=$1", [id]);
+  expect((await as(c, adm, "select icd10_codes from claims where id=$1", [id])).rows[0].icd10_codes).toEqual(["F43.2"]);
+  await setStatus(c, adm, id, "submitted"); // admin can still work the claim
   expect((await as(c, adm, "select code from icd10_codes where code='F41.1'")).rowCount).toBe(1);
+}));
+
+it("claim ICD-10 codes must exist in icd10_codes; approved cannot exceed claimed", () => withClient(async (c) => {
+  const { psy, claim, i } = await setup(c);
+  await expect(as(c, psy, "update claims set icd10_codes='{F41.1,X00.0}' where id=$1", [claim])).rejects.toThrow(/unknown_icd10/);
+  const { i: i2, m: m2 } = await mkMaInvoice(c, (await c.query("select patient_id from invoices where id=$1", [i])).rows[0].patient_id);
+  await expect(as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents,icd10_codes) values ($1,$2,1,'{nope}')", [i2, m2])).rejects.toThrow(/unknown_icd10/);
+  await as(c, psy, "update claims set icd10_codes='{F41.1,F43.2}' where id=$1", [claim]);
+  await expect(as(c, psy, "update claims set approved_cents=80001 where id=$1", [claim])).rejects.toThrow(/check constraint/);
+  await as(c, psy, "update claims set approved_cents=80000 where id=$1", [claim]);
 }));
 
 it("medical_aid_members: staff write; patient/guardian read own; bookkeeper, associate and others see nothing", () => withClient(async (c) => {

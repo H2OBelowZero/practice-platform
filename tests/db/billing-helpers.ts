@@ -36,6 +36,15 @@ export const status = async (c: Client, i: string) => (await c.query("select sta
 export const paid = async (c: Client, i: string) => (await c.query("select invoice_paid_cents($1) v", [i])).rows[0].v as number;
 export const count = (c: Client, u: string, table: string) => asUser(c, u, async () => (await c.query(`select 1 from ${table}`)).rowCount);
 export const as = (c: Client, u: string, sql: string, params: unknown[] = []) => asUser(c, u, () => c.query(sql, params));
-/** psychologist records a payment through the public function */
-export const pay = (c: Client, u: string, i: string, method: string, amount: number, ref: string | null = null) =>
-  as(c, u, "select record_payment($1,$2,$3,$4,null) id", [i, method, amount, ref]);
+
+let refSeq = 0;
+/** manual payment through the public function; eft / card_machine need a reference, so one is made up unless given */
+export const pay = (c: Client, u: string, i: string, method: string, amount: number, ref: string | null = null, on: string | null = null) =>
+  as(c, u, "select record_payment($1,$2,$3,$4,null,coalesce($5::date, current_date)) id",
+    [i, method, amount, ref ?? (method === "cash" ? null : `AUTO-${++refSeq}`), on]);
+
+export async function guardianWith(c: Client, patient: string, permissions: string, validTo: string | null = null) {
+  const g = await mkUser(c, "guardian");
+  await c.query("insert into guardianships(guardian_user_id,patient_id,permissions,valid_to) values ($1,$2,$3,$4)", [g, patient, permissions, validTo]);
+  return g;
+}
