@@ -14,3 +14,9 @@ export async function supabaseServer() {
     },
   });
 }
+
+/** Belt and braces for fail-closed paths: drop every Supabase auth cookie even if signOut() failed. */
+export async function clearAuthCookies() {
+  const store = await cookies();
+  for (const { name } of store.getAll()) if (name.startsWith("sb-")) { try { store.delete(name); } catch {} }
+}

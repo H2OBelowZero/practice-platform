@@ -28,3 +28,14 @@ it("the trigger function cannot be called directly by signed-in users", () => wi
     await expect(c.query("select handle_new_user()")).rejects.toThrow(/permission denied for function handle_new_user/);
   });
 }));
+
+it("signup display_name is trimmed and capped at 100 characters", () => withClient(async (c) => {
+  const long = await profile(c, await signup(c, "long@t.test", { name: "  " + "x".repeat(150) + "  " }));
+  expect(long[0].display_name).toBe("x".repeat(100));
+  const spaced = await profile(c, await signup(c, "sp@t.test", { name: "y".repeat(99) + " " + "z".repeat(10) }));
+  expect(spaced[0].display_name).toBe("y".repeat(99)); // no trailing space left after the cap
+  const ws = await profile(c, await signup(c, "ws@t.test", { name: " \t\n " }));
+  expect(ws[0].display_name).toBe("ws");
+  const longMail = await profile(c, await signup(c, "m".repeat(150) + "@t.test", null));
+  expect(longMail[0].display_name).toBe("m".repeat(100));
+}));

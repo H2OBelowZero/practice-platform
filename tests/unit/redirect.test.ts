@@ -15,3 +15,9 @@ it.each([
 ])("rejects %j", (bad) => {
   expect(safeNext(bad as string | undefined, "/fallback")).toBe("/fallback");
 });
+
+import { mfaUrl } from "@/lib/auth/redirect";
+it("mfaUrl carries only a safe current path", () => {
+  expect(mfaUrl("/app/patients?x=1")).toBe("/mfa?next=%2Fapp%2Fpatients%3Fx%3D1");
+  for (const bad of [null, undefined, "", "//evil.example", "https://evil.example", "/\\evil.example"]) expect(mfaUrl(bad)).toBe("/mfa");
+});

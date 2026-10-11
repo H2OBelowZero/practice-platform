@@ -5,8 +5,9 @@ import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { homeFor, needsMfa } from "@/lib/auth/roles";
 import { safeNext } from "@/lib/auth/redirect";
-import { currentUser } from "@/lib/auth/session";
-import { supabaseServer } from "@/lib/supabase/server";
+import { currentUser, requireRecoverySession } from "@/lib/auth/session";
+import { appUrl } from "@/lib/app-url";
+import { clearAuthCookies, supabaseServer } from "@/lib/supabase/server";
 
 // Every action takes untrusted FormData: parse with Zod first. Passwords and codes are never logged or put in URLs.
 
@@ -16,6 +17,12 @@ export type FormState = {
   done?: boolean;
   enrol?: { factorId: string; qr: string; secret: string };
 } | null;
+
+/** Fail-closed exit: end the session on this device and drop the cookies even if signOut itself fails. */
+async function dropSession(sb: Awaited<ReturnType<typeof supabaseServer>>) {
+  try { await sb.auth.signOut({ scope: "local" }); } catch { /* cookies are cleared below regardless */ }
+  await clearAuthCookies();
+}
 
 const LOGIN_FAILED = "Email or password is incorrect."; // same text for unknown email, wrong password, unconfirmed account
 const email = z.string().trim().pipe(z.email().max(254));
@@ -39,13 +46,13 @@ export async function signIn(_prev: FormState, formData: FormData): Promise<Form
   }
   const me = await currentUser(sb);
   if (!me) { // authenticated but has no profile: treat as a failed sign-in
-    await sb.auth.signOut();
+    await dropSession(sb);
     return { error: LOGIN_FAILED, email: mail };
   }
   try {
     await audit("auth.login", "session", undefined, undefined, sb);
   } catch {
-    await sb.auth.signOut(); // fail closed: no un-audited sessions
+    await dropSession(sb); // fail closed: no un-audited sessions
     return { error: "Sign-in is temporarily unavailable. Try again shortly.", email: mail };
   }
   const dest = safeNext(next, homeFor(me.role));
@@ -67,10 +74,10 @@ export async function signOut(): Promise<void> {
 export async function requestRecovery(_prev: FormState, formData: FormData): Promise<FormState> {
   const parsed = z.object({ email }).safeParse(raw(formData));
   if (!parsed.success) return { error: "Enter a valid email address." };
+  const redirectTo = `${appUrl()}/auth/callback?next=/recover/reset`; // throws loudly in production if APP_URL is unset
   try {
     const sb = await supabaseServer();
-    const origin = process.env.APP_URL ?? "http://localhost:3000";
-    await sb.auth.resetPasswordForEmail(parsed.data.email.toLowerCase(), { redirectTo: `${origin}/auth/callback?next=/recover/reset` });
+    await sb.auth.resetPasswordForEmail(parsed.data.email.toLowerCase(), { redirectTo });
   } catch { /* ignored on purpose: the response must not depend on whether the account exists */ }
   return { done: true };
 }
@@ -83,9 +90,7 @@ const resetSchema = z.object({
 export async function resetPassword(_prev: FormState, formData: FormData): Promise<FormState> {
   const parsed = resetSchema.safeParse(raw(formData));
   if (!parsed.success) return { error: parsed.error.issues[0].message };
-  const sb = await supabaseServer();
-  const me = await currentUser(sb);
-  if (!me) redirect("/login?error=link");
+  const { sb } = await requireRecoverySession(); // fresh recovery link only; staff must be aal2
   const { error } = await sb.auth.updateUser({ password: parsed.data.password });
   if (error) return { error: "That password could not be used. Choose a different one (at least 12 characters)." };
   try { await audit("auth.password_reset", "session", undefined, undefined, sb); }

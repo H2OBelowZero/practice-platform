@@ -5,7 +5,7 @@ import { useFormStatus } from "react-dom";
 import type { FormState } from "./actions";
 
 // Small shared form pieces for the auth pages (a design pass comes later). Errors are text, never colour alone,
-// and the error summary takes focus when a submit fails.
+// and the error summary takes focus when a submit fails (focus announces it; no role="alert", so it is not read twice).
 
 export const ERROR_ID = "form-error";
 
@@ -14,7 +14,7 @@ export function FormError({ state }: { state: FormState }) {
   useEffect(() => { if (state?.error) ref.current?.focus(); }, [state]); // state is a new object on every submit
   if (!state?.error) return null;
   return (
-    <p id={ERROR_ID} ref={ref} tabIndex={-1} role="alert"
+    <p id={ERROR_ID} ref={ref} tabIndex={-1}
        className="mb-4 border-l-4 border-red-700 bg-red-50 p-3 text-red-900 outline-offset-2 focus:outline-2 focus:outline-red-700">
       <strong>Error: </strong>{state.error}
     </p>

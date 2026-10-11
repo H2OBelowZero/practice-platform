@@ -14,3 +14,9 @@ export function safeNext(next: string | undefined | null, fallback: string): str
   }
   return next;
 }
+
+/** /mfa, optionally carrying the page to return to (only if it is a safe same-origin path). */
+export function mfaUrl(currentPath?: string | null): string {
+  const next = safeNext(currentPath, "");
+  return next ? `/mfa?next=${encodeURIComponent(next)}` : "/mfa";
+}
