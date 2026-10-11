@@ -15,10 +15,11 @@ export const RETRY_WITH_SLOTS: BookingErrorCode[] = ["taken", "unavailable"];
 export function bookingErrorCode(message: string | undefined | null): BookingErrorCode {
   const m = message ?? "";
   if (m.includes("slot_taken")) return "taken";
-  if (m.includes("start_in_past") || m.includes("outside_hours") || m.includes("blocked_time")) return "unavailable";
+  if (m.includes("start_in_past") || m.includes("outside_hours") || m.includes("blocked_time") || m.includes("beyond_horizon")) return "unavailable";
   if (m.includes("too_many_bookings")) return "limit";
   if (m.includes("unknown_session_type")) return "type";
   return "generic"; // includes 'forbidden' and anything unexpected: never leak internals
 }
 
-export const isBookingErrorCode = (s: string | undefined): s is BookingErrorCode => !!s && s in BOOKING_ERROR_TEXT;
+// Object.hasOwn, not `in`: ?e=__proto__ / toString / constructor must not count as codes (they live on the prototype chain).
+export const isBookingErrorCode = (s: string | undefined): s is BookingErrorCode => typeof s === "string" && Object.hasOwn(BOOKING_ERROR_TEXT, s);

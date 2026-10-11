@@ -8,7 +8,7 @@ const START = "2031-01-06T06:00:00.000Z";
 
 it.each([
   ["slot_taken", "taken"], ["error: slot_taken", "taken"],
-  ["start_in_past", "unavailable"], ["outside_hours", "unavailable"], ["blocked_time", "unavailable"],
+  ["start_in_past", "unavailable"], ["outside_hours", "unavailable"], ["blocked_time", "unavailable"], ["beyond_horizon", "unavailable"],
   ["too_many_bookings", "limit"], ["unknown_session_type", "type"],
   ["forbidden", "generic"], ["anything else", "generic"], ["", "generic"], [undefined, "generic"], [null, "generic"],
 ] as const)("maps database message %j to %s", (msg, code) => expect(bookingErrorCode(msg)).toBe(code));
@@ -20,6 +20,10 @@ it("wording: taken says 'just taken', unavailable says 'not available', limit me
   expect(isBookingErrorCode("taken")).toBe(true);
   expect(isBookingErrorCode("<script>")).toBe(false);
   expect(isBookingErrorCode(undefined)).toBe(false);
+});
+
+it.each(["__proto__", "toString", "constructor", "hasOwnProperty", "valueOf", ""])("?e=%s is not a booking error code (prototype keys)", (key) => {
+  expect(isBookingErrorCode(key)).toBe(false);
 });
 
 it("booking input needs a uuid, a canonical ISO instant and acceptedTerms === true", () => {

@@ -30,6 +30,12 @@ it("every status has an icon and a text label; unknown values still get both", (
   expect(statusMeta("some_new_state")).toMatchObject({ label: "Some new state", tone: "neutral" });
 });
 
+it("built-in status labels are short enough to stay on one line at 375px (chips wrap for longer overrides)", () => {
+  // text-sm is about 7px per character; icon + padding add about 50px, and the phone content area is 343px wide
+  for (const [k, m] of Object.entries(STATUS)) expect(m.label.length * 7 + 50, k).toBeLessThan(343);
+  expect(Math.max(...Object.values(STATUS).map((m) => m.label.length))).toBeLessThanOrEqual(12);
+});
+
 it("formats rand", () => {
   expect(formatZar(95000)).toBe("R 950,00");
   expect(formatZar(123450)).toBe("R 1 234,50");

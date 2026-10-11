@@ -21,7 +21,7 @@ export function RegisterForm({ next }: { next?: string }) {
     <form action={action} noValidate>
       <FormError state={state} />
       {next && <input type="hidden" name="next" value={next} />}
-      <Field id="name" label="Full name" autoComplete="name" required defaultValue="" invalid={invalid} />
+      <Field id="name" label="Full name" autoComplete="name" required defaultValue={state?.name} invalid={invalid} />
       <Field id="email" label="Email address" type="email" autoComplete="username" inputMode="email" required defaultValue={state?.email} invalid={invalid} />
       <Field id="password" label="Password" type="password" autoComplete="new-password" required minLength={12} maxLength={72}
              hint="At least 12 characters. A few random words make a strong, memorable password." invalid={invalid} />

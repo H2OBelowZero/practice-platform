@@ -88,8 +88,9 @@
 /* Visible 3px focus ring on everything focusable (keyboard only, so mouse clicks stay quiet). */
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .on-dark :focus-visible { outline-color: var(--focus-on-dark); }
-/* Programmatically focused containers (error summaries) show the same ring. */
-[tabindex="-1"]:focus { outline: 3px solid var(--focus); outline-offset: 2px; }
+/* Programmatically focused containers (error summaries, <main tabindex="-1"> after the skip link) show the same ring, but only when
+   the browser treats the focus as keyboard-like: a mouse click inside <main> must not outline the whole page. */
+[tabindex="-1"]:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
 ::selection { background: var(--color-sage-200); color: var(--color-ink); }
 

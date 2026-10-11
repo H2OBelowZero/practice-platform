@@ -58,6 +58,13 @@ allow-list, and set `APP_URL` to the site's public origin (used for password-res
   should be present while the new user signs in and scans the QR code at `/mfa` (or send an invite and have the
   user do it immediately). Until a staff account has a verified factor, anyone holding its password can enrol their own
   authenticator on first sign-in.
+- **Email confirmation is a security control (MUST be on)**: in the hosted Supabase project enable Authentication >
+  Providers > Email > "Confirm email", and turn on "Secure email change". `ensure_patient_record()` (0008) only attaches a
+  staff-created patient record to a self-registered account when the account's email is confirmed, exactly one unlinked
+  row has that address, and staff have invited that person to the portal (`patients.portal_invited_at`, set by the
+  "Invite to portal" action added in Task 11) and the row is not a minor or archived. With confirmation off, anyone could
+  register someone else's address and read their record. Every other registration gets a new prospect row, and a
+  "Possible duplicate patient: review and merge" task is raised when an email-matching row existed but could not be linked.
 - **Session limits**: at go-live set the Supabase session time-box and inactivity timeout (Authentication > Sessions;
   Pro plan feature) so idle staff sessions expire.
 - **Authorisation is not middleware**: `middleware.ts` only refreshes the session and bounces anonymous visitors. Every

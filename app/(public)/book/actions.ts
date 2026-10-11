@@ -7,6 +7,7 @@ import { requireRole } from "@/lib/auth/session";
 import { getSlots } from "@/lib/booking/availability";
 import { BOOKING_ERROR_TEXT, RETRY_WITH_SLOTS, bookingErrorCode, type BookingErrorCode } from "@/lib/booking/errors";
 import { bookingInputSchema, startInBookingWindow } from "@/lib/booking/input";
+import { getPractice } from "@/lib/practice";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseService } from "@/lib/supabase/service";
 import { sastDate, sastDateLabel, sastTime } from "@/lib/time";
@@ -72,7 +73,12 @@ export async function bookAppointment(input: unknown): Promise<BookState> {
       });
       if (error) console.error("booking notification not queued:", error.code);
     }
-    await audit("booking.create", "appointments", apptId, { status });
+    // the terms the patient accepted (checkbox -> financial_terms consent) are the practice settings in force right now
+    const practice = await getPractice();
+    await audit("booking.create", "appointments", apptId, {
+      status,
+      terms_accepted: { cancellation_window_hours: practice?.cancellation_window_hours ?? null, late_cancel_fee_cents: practice?.late_cancel_fee_cents ?? null },
+    });
   } catch (e) {
     console.error("booking follow-up failed:", e instanceof Error ? e.message : "unknown");
   }

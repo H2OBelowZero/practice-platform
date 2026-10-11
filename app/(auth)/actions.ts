@@ -14,6 +14,7 @@ import { clearAuthCookies, supabaseServer } from "@/lib/supabase/server";
 export type FormState = {
   error?: string;
   email?: string;
+  name?: string;
   done?: boolean;
   enrol?: { factorId: string; qr: string; secret: string };
 } | null;
@@ -82,7 +83,7 @@ const registerSchema = z.object({
 export async function register(_prev: FormState, formData: FormData): Promise<FormState> {
   const parsed = registerSchema.safeParse(raw(formData));
   if (!parsed.success) {
-    return { error: parsed.error.issues[0].message, email: String(formData.get("email") ?? "").slice(0, 254) };
+    return { error: parsed.error.issues[0].message, email: String(formData.get("email") ?? "").slice(0, 254), name: String(formData.get("name") ?? "").slice(0, 100) };
   }
   const { name, password, next } = parsed.data;
   const mail = parsed.data.email.toLowerCase();
@@ -93,8 +94,8 @@ export async function register(_prev: FormState, formData: FormData): Promise<Fo
   const sb = await supabaseServer();
   const { error } = await sb.auth.signUp({ email: mail, password, options: { emailRedirectTo, data: { name } } });
   if (error) {
-    if (error.status === 429) return { error: "Too many attempts. Wait a few minutes and try again.", email: mail };
-    if (error.code === "weak_password") return { error: "That password is too easy to guess. Choose a longer, less common one.", email: mail };
+    if (error.status === 429) return { error: "Too many attempts. Wait a few minutes and try again.", email: mail, name };
+    if (error.code === "weak_password") return { error: "That password is too easy to guess. Choose a longer, less common one.", email: mail, name };
     // Anything else (including "already registered") gets the same answer as success: the response must not reveal whether an account exists.
     console.error("signUp failed:", error.status, error.code);
   }

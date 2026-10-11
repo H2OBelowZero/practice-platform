@@ -1,8 +1,14 @@
 import { it, expect } from "vitest";
 import type { Client } from "pg";
 import { withClient, asUser, mkUser } from "./helpers";
+// Non-staff bookings are limited to 60 days ahead (0008), so every date a patient books is relative to today:
+// D(n) is n days after D0, a Monday about a week from now; E(n) the same from E0, the Monday after (E(0) = D(7)). Offsets keep the weekday.
+const mondayAfter = (days: number) => { const d = new Date(Date.now() + days * 86400_000); while (d.getUTCDay() !== 1) d.setUTCDate(d.getUTCDate() + 1); return d; };
+const shift = (d: Date, n: number) => new Date(d.getTime() + n * 86400_000).toISOString().slice(0, 10);
+const D0 = mondayAfter(7), E0 = new Date(D0.getTime() + 7 * 86400_000);
+const D = (n: number) => shift(D0, n), E = (n: number) => shift(E0, n);
 
-const T0 = "2030-01-07T08:00:00Z";
+const T0 = `${D(0)}T08:00:00Z`;
 async function seed(c: Client) {
   const psy = await mkUser(c, "psychologist");
   const t = (await c.query("insert into session_types(name,duration_min,fee_cents) values ('Therapy',50,95000) returning id")).rows[0].id;
@@ -22,7 +28,7 @@ async function seedPatients(c: Client) {
 const book = async (c: Client, p: string, t: string, at = T0, status = "confirmed") =>
   (await c.query("select book_appointment($1,$2,$3,$4) id", [p, t, at, status])).rows[0].id as string;
 const row = async (c: Client, id: string) => (await c.query("select * from appointments where id=$1", [id])).rows[0];
-const MON = "2031-01-06"; // a Monday; 08:00-17:00 SAST = 06:00Z-15:00Z
+const MON = E(0); // a Monday; 08:00-17:00 SAST = 06:00Z-15:00Z
 const eventsFull = async (c: Client, id: string) =>
   (await c.query("select event, detail from appointment_events where appointment_id=$1 order by id", [id])).rows;
 const insAppt = (c: Client, p: string, t: string, at: string, status: string) => c.query(
@@ -38,14 +44,14 @@ const events = async (c: Client, id: string) =>
 
 it("rejects overlapping confirmed appointments", () => withClient(async (c) => {
   const { t, p } = await seed(c);
-  await c.query("select book_appointment($1,$2,'2030-01-07T08:00:00Z')", [p, t]);
-  await expect(c.query("select book_appointment($1,$2,'2030-01-07T08:30:00Z')", [p, t])).rejects.toThrow(/slot_taken/);
+  await c.query(`select book_appointment($1,$2,'${D(0)}T08:00:00Z')`, [p, t]);
+  await expect(c.query(`select book_appointment($1,$2,'${D(0)}T08:30:00Z')`, [p, t])).rejects.toThrow(/slot_taken/);
 }));
 it("allows a cancelled slot to be rebooked and records events", () => withClient(async (c) => {
   const { t, p } = await seed(c);
-  const id = (await c.query("select book_appointment($1,$2,'2030-01-07T08:00:00Z') id", [p, t])).rows[0].id;
+  const id = (await c.query(`select book_appointment($1,$2,'${D(0)}T08:00:00Z') id`, [p, t])).rows[0].id;
   await c.query("update appointments set status='cancelled' where id=$1", [id]);
-  await c.query("select book_appointment($1,$2,'2030-01-07T08:00:00Z')", [p, t]);
+  await c.query(`select book_appointment($1,$2,'${D(0)}T08:00:00Z')`, [p, t]);
   const ev = await c.query("select event from appointment_events where appointment_id=$1 order by id", [id]);
   expect(ev.rows.map((r) => r.event)).toEqual(["created", "status:cancelled"]);
 }));
@@ -64,10 +70,10 @@ it("tentative blocks a slot; cancelled and requested do not", () => withClient(a
   await expect(c.query("select book_appointment($1,$2,$3)", [p, t, T0])).rejects.toThrow(/slot_taken/);
   const ins = (at: string, status: string) => c.query(
     "insert into appointments(patient_id,session_type_id,starts_at,ends_at,status) values ($1,$2,$3,$3::timestamptz + interval '50 min',$4)", [p, t, at, status]);
-  await ins("2030-01-08T08:00:00Z", "cancelled");
-  await ins("2030-01-09T08:00:00Z", "requested");
-  await book(c, p, t, "2030-01-08T08:00:00Z");
-  await book(c, p, t, "2030-01-09T08:00:00Z");
+  await ins(`${D(1)}T08:00:00Z`, "cancelled");
+  await ins(`${D(2)}T08:00:00Z`, "requested");
+  await book(c, p, t, `${D(1)}T08:00:00Z`);
+  await book(c, p, t, `${D(2)}T08:00:00Z`);
 }));
 
 it("unknown session type is rejected", () => withClient(async (c) => {
@@ -91,19 +97,19 @@ it("status is decided by the DB for non-staff (R19), staff may choose", () => wi
   const patientBook = (at: string, status: string) => asUser(c, ua, async () => book(c, pa, t, at, status));
   await c.query("update practices set approval_mode='request'");
   expect((await row(c, await patientBook(T0, "confirmed"))).status).toBe("tentative");
-  expect((await row(c, await patientBook("2030-01-07T10:00:00Z", "attended"))).status).toBe("tentative"); // junk ignored
+  expect((await row(c, await patientBook(`${D(0)}T10:00:00Z`, "attended"))).status).toBe("tentative"); // junk ignored
   await c.query("update practices set approval_mode='auto'");
-  expect((await row(c, await patientBook("2030-01-07T12:00:00Z", "tentative"))).status).toBe("confirmed");
+  expect((await row(c, await patientBook(`${D(0)}T12:00:00Z`, "tentative"))).status).toBe("confirmed");
   await asUser(c, psy, async () => {
-    expect((await row(c, await book(c, pa, t, "2030-01-07T13:00:00Z", "tentative"))).status).toBe("tentative");
-    expect((await row(c, await book(c, pa, t, "2030-01-07T14:00:00Z", "confirmed"))).status).toBe("confirmed");
-    await expect(c.query("select book_appointment($1,$2,$3,'attended')", [pa, t, "2030-01-07T15:00:00Z"])).rejects.toThrow(/invalid_status/);
+    expect((await row(c, await book(c, pa, t, `${D(0)}T13:00:00Z`, "tentative"))).status).toBe("tentative");
+    expect((await row(c, await book(c, pa, t, `${D(0)}T14:00:00Z`, "confirmed"))).status).toBe("confirmed");
+    await expect(c.query("select book_appointment($1,$2,$3,'attended')", [pa, t, `${D(0)}T15:00:00Z`])).rejects.toThrow(/invalid_status/);
   });
 }));
 
 it("patients cannot write appointments directly (RLS) but can read their own", () => withClient(async (c) => {
   const { t, ua, pa, pb } = await seedPatients(c);
-  const mine = await book(c, pa, t); const theirs = await book(c, pb, t, "2030-01-07T10:00:00Z");
+  const mine = await book(c, pa, t); const theirs = await book(c, pb, t, `${D(0)}T10:00:00Z`);
   await asUser(c, ua, async () => {
     expect((await c.query("select id from appointments")).rows).toEqual([{ id: mine }]);
     expect((await c.query("update appointments set status='cancelled' where id=$1", [mine])).rowCount).toBe(0);
@@ -111,7 +117,7 @@ it("patients cannot write appointments directly (RLS) but can read their own", (
     expect((await c.query("delete from appointments where id=$1", [mine])).rowCount).toBe(0);
     await expect(c.query(
       "insert into appointments(patient_id,session_type_id,starts_at,ends_at) values ($1,$2,$3,$3::timestamptz + interval '1 hour')",
-      [pa, t, "2030-01-10T08:00:00Z"])).rejects.toThrow(/row-level security/);
+      [pa, t, `${D(3)}T08:00:00Z`])).rejects.toThrow(/row-level security/);
     await expect(c.query("insert into appointment_events(appointment_id,event) values ($1,'x')", [mine])).rejects.toThrow(/row-level security/);
   });
   expect((await row(c, mine)).status).toBe("confirmed");
@@ -149,18 +155,18 @@ it("cancel_appointment: another patient is forbidden; staff may cancel; unknown 
 it("reschedule_appointment moves to the new slot and frees the old one", () => withClient(async (c) => {
   const { t, ua, pa } = await seedPatients(c);
   const old = await book(c, pa, t);
-  const nid = await asUser(c, ua, async () => (await c.query("select reschedule_appointment($1,'2030-01-07T10:00:00Z') id", [old])).rows[0].id as string);
+  const nid = await asUser(c, ua, async () => (await c.query(`select reschedule_appointment($1,'${D(0)}T10:00:00Z') id`, [old])).rows[0].id as string);
   expect(nid).not.toBe(old);
   const n = await row(c, nid);
   expect([n.status, n.patient_id, n.session_type_id, n.starts_at.toISOString(), n.ends_at.toISOString()])
-    .toEqual(["confirmed", pa, t, "2030-01-07T10:00:00.000Z", "2030-01-07T10:50:00.000Z"]);
+    .toEqual(["confirmed", pa, t, `${D(0)}T10:00:00.000Z`, `${D(0)}T10:50:00.000Z`]);
   const o = await row(c, old);
   expect([o.status, o.cancelled_by, o.cancel_reason]).toEqual(["cancelled", ua, "rescheduled"]);
   const oe = await eventsFull(c, old); const ne = await eventsFull(c, nid);
   expect(oe.map((e) => e.event)).toEqual(["created", "status:cancelled", "rescheduled"]);
   expect(oe[2].detail.new_id).toBe(nid);
   expect([new Date(oe[2].detail.from).toISOString(), new Date(oe[2].detail.to).toISOString()])
-    .toEqual(["2030-01-07T08:00:00.000Z", "2030-01-07T10:00:00.000Z"]);
+    .toEqual([`${D(0)}T08:00:00.000Z`, `${D(0)}T10:00:00.000Z`]);
   expect(ne.map((e) => e.event)).toEqual(["created"]);
   expect(ne[0].detail.rescheduled_from).toBe(old);
   await book(c, pa, t); // old slot is free again
@@ -169,7 +175,7 @@ it("reschedule_appointment moves to the new slot and frees the old one", () => w
 it("reschedule_appointment can shift into a slot overlapping its own", () => withClient(async (c) => {
   const { t, p } = await seed(c);
   const old = await book(c, p, t);
-  const nid = (await c.query("select reschedule_appointment($1,'2030-01-07T08:30:00Z') id", [old])).rows[0].id;
+  const nid = (await c.query(`select reschedule_appointment($1,'${D(0)}T08:30:00Z') id`, [old])).rows[0].id;
   expect((await row(c, old)).status).toBe("cancelled");
   expect((await row(c, nid)).status).toBe("confirmed");
 }));
@@ -177,9 +183,9 @@ it("reschedule_appointment can shift into a slot overlapping its own", () => wit
 it("reschedule_appointment conflict leaves the original untouched", () => withClient(async (c) => {
   const { t, ua, pa, pb } = await seedPatients(c);
   const old = await book(c, pa, t);
-  await book(c, pb, t, "2030-01-07T10:00:00Z");
+  await book(c, pb, t, `${D(0)}T10:00:00Z`);
   await asUser(c, ua, async () => {
-    await expect(c.query("select reschedule_appointment($1,'2030-01-07T10:30:00Z')", [old])).rejects.toThrow(/slot_taken/);
+    await expect(c.query(`select reschedule_appointment($1,'${D(0)}T10:30:00Z')`, [old])).rejects.toThrow(/slot_taken/);
   });
   expect((await row(c, old)).status).toBe("confirmed");
   expect(await events(c, old)).toEqual(["created"]);
@@ -190,23 +196,23 @@ it("reschedule_appointment: forbidden for other patients, not_reschedulable once
   const { t, ua, ub, pa } = await seedPatients(c);
   const id = await book(c, pa, t);
   await asUser(c, ub, async () => {
-    await expect(c.query("select reschedule_appointment($1,'2030-01-07T10:00:00Z')", [id])).rejects.toThrow(/forbidden/);
+    await expect(c.query(`select reschedule_appointment($1,'${D(0)}T10:00:00Z')`, [id])).rejects.toThrow(/forbidden/);
   });
   await asUser(c, ua, async () => {
     await c.query("select cancel_appointment($1,null)", [id]);
-    await expect(c.query("select reschedule_appointment($1,'2030-01-07T10:00:00Z')", [id])).rejects.toThrow(/not_reschedulable/);
+    await expect(c.query(`select reschedule_appointment($1,'${D(0)}T10:00:00Z')`, [id])).rejects.toThrow(/not_reschedulable/);
   });
 }));
 
 it("busy_ranges exposes only time ranges, also to anon; anon cannot use the other functions or tables", () => withClient(async (c) => {
   const { t, p } = await seed(c);
   await book(c, p, t);
-  await c.query("insert into blocked_times(starts_at,ends_at,reason) values ('2030-01-07T12:00:00Z','2030-01-07T13:00:00Z','lunch')");
+  await c.query(`insert into blocked_times(starts_at,ends_at,reason) values ('${D(0)}T12:00:00Z','${D(0)}T13:00:00Z','lunch')`);
   await c.query("set local role anon");
   try {
-    const r = await c.query("select * from busy_ranges('2030-01-07T00:00:00Z','2030-01-08T00:00:00Z') order by starts_at");
+    const r = await c.query(`select * from busy_ranges('${D(0)}T00:00:00Z','${D(1)}T00:00:00Z') order by starts_at`);
     expect(r.fields.map((f) => f.name)).toEqual(["starts_at", "ends_at"]);
-    expect(r.rows.map((x) => x.starts_at.toISOString())).toEqual(["2030-01-07T08:00:00.000Z", "2030-01-07T12:00:00.000Z"]);
+    expect(r.rows.map((x) => x.starts_at.toISOString())).toEqual([`${D(0)}T08:00:00.000Z`, `${D(0)}T12:00:00.000Z`]);
     expect((await c.query("select * from appointments")).rows).toEqual([]);
     expect((await c.query("select * from blocked_times")).rows).toEqual([]);
     expect((await c.query("select * from session_types")).rowCount).toBe(1); // public catalogue
@@ -220,8 +226,8 @@ it("created event details carry status and start; one update changing both logs 
   const { t, p } = await seed(c);
   const id = await book(c, p, t, T0, "tentative");
   const [created] = await eventsFull(c, id);
-  expect([created.detail.status, new Date(created.detail.starts_at).toISOString()]).toEqual(["tentative", "2030-01-07T08:00:00.000Z"]);
-  await c.query("update appointments set status='confirmed', starts_at='2030-01-07T09:00:00Z', ends_at='2030-01-07T09:50:00Z' where id=$1", [id]);
+  expect([created.detail.status, new Date(created.detail.starts_at).toISOString()]).toEqual(["tentative", `${D(0)}T08:00:00.000Z`]);
+  await c.query(`update appointments set status='confirmed', starts_at='${D(0)}T09:00:00Z', ends_at='${D(0)}T09:50:00Z' where id=$1`, [id]);
   expect(await events(c, id)).toEqual(["created", "status:confirmed", "rescheduled"]);
 }));
 
@@ -294,7 +300,7 @@ it("non-staff cannot book or reschedule into the past, blocked time or outside o
     [`${MON}T08:30:00Z`, /blocked_time/],          // starts inside block
     [`${MON}T05:30:00Z`, /outside_hours/],         // 07:30 SAST
     [`${MON}T14:30:00Z`, /outside_hours/],         // ends 17:20 SAST
-    ["2031-01-07T06:00:00Z", /outside_hours/],     // Tuesday, no rule
+    [`${E(1)}T06:00:00Z`, /outside_hours/],     // Tuesday, no rule
   ];
   const src = await book(c, pa, t, `${MON}T11:00:00Z`); // source for reschedule attempts (booked by superuser)
   await asUser(c, ua, async () => {
@@ -302,8 +308,8 @@ it("non-staff cannot book or reschedule into the past, blocked time or outside o
       await expect(c.query("select book_appointment($1,$2,$3)", [pa, t, at])).rejects.toThrow(re);
       await expect(c.query("select reschedule_appointment($1,$2)", [src, at])).rejects.toThrow(re);
     }
-    // boundaries are inside: starting right after the block (09:00Z) and ending before close (14:00Z-14:50Z)
-    for (const at of [`${MON}T09:00:00Z`, `${MON}T14:00:00Z`]) {
+    // boundaries are inside: starting right after the block plus the 10 min buffer (09:10Z) and ending before close (14:00Z-14:50Z)
+    for (const at of [`${MON}T09:10:00Z`, `${MON}T14:00:00Z`]) {
       const id = await book(c, pa, t, at);
       await c.query("select cancel_appointment($1,null)", [id]); // free the slot for the staff checks below
     }
