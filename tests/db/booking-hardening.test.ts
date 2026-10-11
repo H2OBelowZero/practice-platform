@@ -185,6 +185,7 @@ describe("booking limits for non-staff", () => {
       // rows made by the caller (events actor = u) in states that must not count
       const mk = async (at: string, status: string) => {
         const id = await bookAs(c, u, p, t, at);
+        if (status === "attended") await c.query("update appointments set status='confirmed' where id=$1", [id]); // tentative -> confirmed -> attended (0009 state machine)
         await c.query("update appointments set status=$2 where id=$1", [id, status]);
       };
       await mk(day(10), "cancelled");
