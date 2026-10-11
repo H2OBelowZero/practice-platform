@@ -1,7 +1,7 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
 
-// Workflow B (part): a patient cancels inside the cancellation window, sees the fee warning first, and the practice sees the cancellation
-// and a "Late cancellation: review fee" task (R29: a task, not an invoice). Needs a running app AND the seeded staging project (Task 17);
+// Workflow B (part): a patient cancels inside the cancellation window, sees the fee warning first (and cannot reschedule instead: 0010),
+// and the practice sees the cancellation and ONE "Late cancellation: review fee" task, created by the database (R29: a task, not an invoice). Needs a running app AND the seeded staging project (Task 17);
 // it cannot run in the local no-Docker setup (R13), so it skips itself when the inputs below are missing.
 //   E2E_PATIENT_A_EMAIL, E2E_PATIENT_B_EMAIL, E2E_PASSWORD
 //   E2E_LATE_APPT_ID    id of a confirmed appointment of patient A that starts within the practice's cancellation window
@@ -28,6 +28,13 @@ test.describe("late cancellation", () => {
     await patient.goto(`/portal/appointments/${APPT}`);
     // the policy outcome is shown BEFORE anything is confirmed
     await expect(patient.getByText(/Cancelling now may incur a fee of R/)).toBeVisible();
+
+    // inside the window a patient cannot move it (otherwise: reschedule far away, then cancel that one for free): no slot picker, only the policy
+    await expect(patient.getByRole("link", { name: "Reschedule" })).toHaveCount(0);
+    await patient.goto(`/portal/appointments/${APPT}/reschedule`);
+    await expect(patient.getByText(/inside the cancellation window/)).toBeVisible();
+    await expect(patient.getByRole("button", { name: "Show available times" })).toHaveCount(0);
+    await patient.goto(`/portal/appointments/${APPT}`);
 
     // inline confirmation panel (no browser dialog)
     await patient.getByRole("link", { name: "Cancel appointment" }).click();

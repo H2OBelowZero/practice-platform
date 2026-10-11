@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/session";
 import { APPT_ERROR, apptErrorCode, apptErrorText } from "@/lib/appointments/errors";
-import { createLateFeeTask, queueApptEmail, safely } from "@/lib/appointments/followups";
+import { queueApptEmail, safely } from "@/lib/appointments/followups";
 import { apptId, isoInstant } from "@/lib/appointments/input";
 import { isActiveStatus } from "@/lib/appointments/rules";
 import type { ActionState } from "@/lib/appointments/types";
@@ -25,9 +25,9 @@ async function loadOwn(id: string) {
 }
 
 /**
- * Cancel an appointment (patient or guardian). The cancellation policy is computed here for the fee task; the database
- * (cancel_appointment) decides whether the cancel is allowed at all (ownership, guardian permission, not started, still active).
- * A late cancel never creates an invoice here: it creates a staff task (R29).
+ * Cancel an appointment (patient or guardian). The database (cancel_appointment, 0010) decides whether the cancel is allowed
+ * (ownership, guardian permission, not started, still active) and, in the same transaction, creates the late-fee task and the audit row.
+ * The policy outcome is computed here only to choose the confirmation message (R29: a late cancel is a staff task, never an invoice).
  */
 export async function cancelAppointment(id: unknown): Promise<ActionState> {
   await requireRole(["patient", "guardian"]);
@@ -46,13 +46,11 @@ export async function cancelAppointment(id: unknown): Promise<ActionState> {
   const { error } = await sb.rpc("cancel_appointment", { p_appt: appt.id, p_reason: "patient_cancelled" });
   if (error) return { error: apptErrorText(error.message) };
 
-  // The cancellation has happened. Nothing below may make it look as if it failed.
-  if (outcome.feeCents > 0) await createLateFeeTask(appt.patient_id, appt.id);
+  // The cancellation (task and audit included) is committed. The email must not make it look as if it failed.
   await safely("cancel notification", async () => {
     const { data: { user } } = await sb.auth.getUser();
     await queueApptEmail("appointment_cancelled", user?.email, appt.starts_at);
   });
-  await safely("cancel audit", () => audit("appointment.cancel", "appointments", appt.id, { late: outcome.late, feeCents: outcome.feeCents }));
   redirect(`/portal/appointments?notice=${outcome.feeCents > 0 ? "cancelled_late" : "cancelled"}`);
 }
 

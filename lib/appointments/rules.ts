@@ -15,3 +15,7 @@ export function guardianMayBook(g: { permissions: unknown; valid_from: string; v
 
 /** The last instant a cancellation is free of charge, given the policy window. */
 export const freeCancelUntil = (startsAt: Date, windowHours: number): Date => new Date(startsAt.getTime() - windowHours * 3600_000);
+
+/** Same test as reschedule_appointment (0010): a patient cannot move an appointment that starts inside the cancellation window. */
+export const insideCancellationWindow = (startsAt: Date, now: Date, windowHours: number): boolean =>
+  startsAt.getTime() - now.getTime() < windowHours * 3600_000;

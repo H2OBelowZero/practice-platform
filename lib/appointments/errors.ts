@@ -5,6 +5,7 @@ import { BOOKING_ERROR_TEXT } from "@/lib/booking/errors";
 export const APPT_ERROR = {
   started: "This appointment has already started, so it can no longer be changed online. Please contact the practice.",
   state: "This appointment can no longer be changed. It may already have been cancelled or completed.",
+  window: "This appointment is inside the cancellation window, so it cannot be moved online. You can cancel it (a late fee may apply) or contact the practice.",
   forbidden: "You do not have permission to change this appointment. Please contact the practice.",
   missing: "We could not find that appointment.",
   taken: BOOKING_ERROR_TEXT.taken,
@@ -18,6 +19,7 @@ export function apptErrorCode(message: string | undefined | null): ApptErrorCode
   const m = message ?? "";
   if (m.includes("already_started")) return "started";
   if (m.includes("not_cancellable") || m.includes("not_reschedulable") || m.includes("invalid_appointment_transition") || m.includes("appointment_times_frozen")) return "state";
+  if (m.includes("inside_cancellation_window")) return "window";
   if (m.includes("forbidden")) return "forbidden";
   if (m.includes("unknown_appointment")) return "missing";
   if (m.includes("slot_taken")) return "taken";

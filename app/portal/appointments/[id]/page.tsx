@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { requireRole } from "@/lib/auth/session";
 import { cancelReasonText } from "@/lib/appointments/events";
 import { apptId } from "@/lib/appointments/input";
-import { freeCancelUntil, guardianMayBook, portalMayChange } from "@/lib/appointments/rules";
+import { freeCancelUntil, guardianMayBook, insideCancellationWindow, portalMayChange } from "@/lib/appointments/rules";
 import { cancellationOutcome } from "@/lib/booking/policy";
 import { durationLabel, formatLabel } from "@/lib/booking/labels";
 import { formatZar } from "@/lib/money";
@@ -55,6 +55,7 @@ export default async function AppointmentPage({ params, searchParams }: { params
   const windowHours = practice?.cancellation_window_hours ?? 24;
   const outcome = cancellationOutcome({ startsAt, now, windowHours, lateFeeCents: practice?.late_cancel_fee_cents ?? 0 });
   const freeUntil = freeCancelUntil(startsAt, windowHours);
+  const canMove = !insideCancellationWindow(startsAt, now, windowHours); // the database refuses a patient move inside the window (0010)
   const confirming = (await searchParams).confirm === "cancel" && upcoming && mayBook;
   const t = appt.session_types;
 
@@ -101,7 +102,8 @@ export default async function AppointmentPage({ params, searchParams }: { params
             </FocusOnMount>
           ) : (
             <div className="flex flex-wrap gap-3">
-              <LinkButton href={`/portal/appointments/${appt.id}/reschedule`} variant="secondary">Reschedule</LinkButton>
+              {!canMove && <p className="basis-full text-sm text-ink-muted">This appointment is inside the cancellation window, so it cannot be rescheduled online. You can cancel it or contact the practice.</p>}
+              {canMove && <LinkButton href={`/portal/appointments/${appt.id}/reschedule`} variant="secondary">Reschedule</LinkButton>}
               <LinkButton href={`/portal/appointments/${appt.id}?confirm=cancel#cancel-panel`} variant="quiet">Cancel appointment</LinkButton>
             </div>
           )}

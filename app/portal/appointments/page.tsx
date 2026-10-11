@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireRole } from "@/lib/auth/session";
-import { isActiveStatus, guardianMayBook, portalMayChange } from "@/lib/appointments/rules";
+import { isActiveStatus, guardianMayBook, insideCancellationWindow, portalMayChange } from "@/lib/appointments/rules";
+import { getPractice } from "@/lib/practice";
 import { noticeText } from "@/lib/appointments/notices";
 import { durationLabel, formatLabel } from "@/lib/booking/labels";
 import { supabaseServer } from "@/lib/supabase/server";
@@ -35,6 +36,7 @@ export default async function PortalAppointments({ searchParams }: { searchParam
   ]);
   const rows = (appts.data ?? []) as unknown as Row[];
   const today = sastDate(now);
+  const windowHours = (await getPractice())?.cancellation_window_hours ?? 24;
   const mayBook = new Set((guardianships.data ?? []).filter((g) => guardianMayBook(g, today)).map((g) => g.patient_id as string));
 
   const upcoming = rows.filter((r) => isActiveStatus(r.status) && new Date(r.starts_at) > now).reverse(); // soonest first
@@ -61,7 +63,7 @@ export default async function PortalAppointments({ searchParams }: { searchParam
           </div>
           {may && (
             <div className="mt-4 flex flex-wrap gap-3">
-              <LinkButton href={`/portal/appointments/${r.id}/reschedule`} variant="secondary" aria-label={`Reschedule the appointment on ${when}`}>Reschedule</LinkButton>
+              {!insideCancellationWindow(new Date(r.starts_at), now, windowHours) && <LinkButton href={`/portal/appointments/${r.id}/reschedule`} variant="secondary" aria-label={`Reschedule the appointment on ${when}`}>Reschedule</LinkButton>}
               <LinkButton href={`/portal/appointments/${r.id}?confirm=cancel#cancel-panel`} variant="quiet" aria-label={`Cancel the appointment on ${when}`}>Cancel</LinkButton>
             </div>
           )}

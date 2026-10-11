@@ -101,3 +101,18 @@ describe("form input", () => {
     expect(createSchema.safeParse({ ...ok, patientId: "nope" }).success).toBe(false);
   });
 });
+
+describe("cancellation window and reschedule", () => {
+  it("matches the database rule at the edge", async () => {
+    const { insideCancellationWindow } = await import("@/lib/appointments/rules");
+    const startsAt = new Date("2031-01-07T10:00:00Z");
+    expect(insideCancellationWindow(startsAt, new Date("2031-01-06T10:00:00Z"), 24)).toBe(false); // exactly 24h: outside
+    expect(insideCancellationWindow(startsAt, new Date("2031-01-06T10:00:01Z"), 24)).toBe(true);
+    expect(insideCancellationWindow(startsAt, new Date("2031-01-07T09:59:00Z"), 0)).toBe(false);  // window 0: never inside while upcoming
+  });
+  it("maps inside_cancellation_window to its own plain-language message", () => {
+    expect(apptErrorCode("inside_cancellation_window")).toBe("window");
+    expect(apptErrorText("error: inside_cancellation_window")).toMatch(/cancel it.*contact the practice/);
+    expect(staffErrorText("inside_cancellation_window")).toBe(APPT_ERROR.window);
+  });
+});

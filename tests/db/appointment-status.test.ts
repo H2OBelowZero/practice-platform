@@ -105,3 +105,38 @@ it("the cancel and reschedule functions still work through the machine, for pati
   expect(await statusOf(c, moved)).toBe("cancelled");
   await expect(asUser(c, pat, () => c.query("select cancel_appointment($1,'again')", [moved]))).rejects.toThrow(/not_cancellable/);
 }));
+
+it("a combined status + time change in one UPDATE is refused, and cancelled rows have frozen times too", () => withClient(async (c) => {
+  const { psy, mk } = await seed(c);
+  for (const st of ["attended", "no_show", "cancelled"]) {
+    const id = await mk("confirmed");
+    await expect(asUser(c, psy, () => c.query("update appointments set status=$2, starts_at=starts_at + interval '1 hour', ends_at=ends_at + interval '1 hour' where id=$1", [id, st])), st)
+      .rejects.toThrow(/appointment_times_frozen/);
+    expect(await statusOf(c, id)).toBe("confirmed");
+  }
+  const x = await mk("confirmed");
+  await asUser(c, psy, () => setStatus(c, x, "cancelled"));
+  await expect(asUser(c, psy, () => c.query("update appointments set starts_at=starts_at + interval '1 hour', ends_at=ends_at + interval '1 hour' where id=$1", [x]))).rejects.toThrow(/appointment_times_frozen/);
+  await expect(c.query("update appointments set ends_at=ends_at + interval '5 min' where id=$1", [x])).rejects.toThrow(/appointment_times_frozen/);
+}));
+
+it("rows created through the API are tentative or confirmed only; the owner and service role may insert any state", () => withClient(async (c) => {
+  const { psy, p, t } = await seed(c);
+  const ins = (st: string, day: number) => c.query(
+    `insert into appointments(patient_id,session_type_id,starts_at,ends_at,status) values ($1,$2,'2032-05-0${day}T06:00:00Z','2032-05-0${day}T06:50:00Z',$3)`, [p, t, st]);
+  for (const st of ["attended", "no_show", "cancelled", "requested"])
+    await expect(asUser(c, psy, () => ins(st, 1)), `staff ${st}`).rejects.toThrow(/invalid_appointment_transition/);
+  await asUser(c, psy, () => ins("confirmed", 2)); await asUser(c, psy, () => ins("tentative", 3));
+  for (const st of ["attended", "no_show", "cancelled", "requested"]) { await ins(st, 4); await asService(c, () => ins(st, 5)); }
+}));
+
+it("staff reschedule goes through the machine: old row cancelled, new row keeps confirmed/tentative, any time allowed", () => withClient(async (c) => {
+  const { psy, mk } = await seed(c);
+  for (const st of ["confirmed", "tentative"]) {
+    const id = await mk(st);
+    const nid = (await asUser(c, psy, () => c.query("select reschedule_appointment($1,'2032-06-01T20:30:00Z') id", [id]))).rows[0].id; // 22:30 SAST: outside hours, staff exempt
+    expect(await statusOf(c, id)).toBe("cancelled");
+    expect(await statusOf(c, nid)).toBe(st);
+    await asUser(c, psy, () => c.query("select cancel_appointment($1,'cleanup')", [nid]));
+  }
+}));

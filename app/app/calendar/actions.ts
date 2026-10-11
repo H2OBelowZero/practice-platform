@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/session";
 import { APPT_ERROR, staffErrorText } from "@/lib/appointments/errors";
-import { createLateFeeTask, patientEmail, queueApptEmail, safely } from "@/lib/appointments/followups";
+import { patientEmail, queueApptEmail, safely } from "@/lib/appointments/followups";
 import { apptId, createSchema, declineSchema, isoInstant, overrideTimeSchema, staffCancelSchema } from "@/lib/appointments/input";
 import type { NoticeCode } from "@/lib/appointments/notices";
 import { isActiveStatus } from "@/lib/appointments/rules";
@@ -48,7 +48,7 @@ async function changeStatus(rawId: unknown, spec: { from: string[]; to: "confirm
 }
 
 export async function confirmAppointment(id: unknown): Promise<ActionState> {
-  return changeStatus(id, { from: ["tentative", "requested"], to: "confirmed", audit: "appointment.confirm", notice: "confirmed", email: "booking_confirmed" });
+  return changeStatus(id, { from: ["tentative"], to: "confirmed", audit: "appointment.confirm", notice: "confirmed", email: "booking_confirmed" });
 }
 export async function markAttended(id: unknown): Promise<ActionState> {
   return changeStatus(id, { from: ["confirmed"], to: "attended", audit: "appointment.attend", notice: "attended", needsStarted: true });
@@ -57,7 +57,7 @@ export async function markNoShow(id: unknown): Promise<ActionState> {
   return changeStatus(id, { from: ["confirmed"], to: "no_show", audit: "appointment.no_show", notice: "no_show", needsStarted: true });
 }
 
-/** Cancel through cancel_appointment (sets cancelled_by and the reason). Shared by decline and staff cancel. */
+/** Cancel through cancel_appointment (sets cancelled_by and the reason; with chargeFee the database creates the one late-fee task, R29, in the same transaction and writes the appointment.cancel audit row). Shared by decline and staff cancel. */
 async function cancelAsStaff(rawId: unknown, reasonText: string, o: { from: string[]; audit: string; notice: NoticeCode; chargeFee: boolean }): Promise<ActionState> {
   const ctx = await load(rawId);
   if (!ctx) return { error: APPT_ERROR.invalid };
@@ -65,10 +65,9 @@ async function cancelAsStaff(rawId: unknown, reasonText: string, o: { from: stri
   if (!appt) return { error: APPT_ERROR.missing };
   if (!o.from.includes(appt.status)) return { error: APPT_ERROR.state };
 
-  const { error } = await sb.rpc("cancel_appointment", { p_appt: id, p_reason: reasonText });
+  const { error } = await sb.rpc("cancel_appointment", { p_appt: id, p_reason: reasonText, p_charge_fee: o.chargeFee });
   if (error) return { error: staffErrorText(error.message) };
 
-  if (o.chargeFee) await createLateFeeTask(appt.patient_id, id); // R29: a task, never an invoice
   await safely(o.audit, () => audit(o.audit, "appointments", id, { from: appt.status, chargeFee: o.chargeFee }));
   await queueApptEmail("appointment_cancelled", await patientEmail(sb, appt.patient_id), appt.starts_at);
   return done(id, o.notice);
@@ -79,7 +78,7 @@ export async function declineAppointment(id: unknown, values: Values): Promise<A
   await requireRole([...STAFF]);
   const v = declineSchema.safeParse(values);
   if (!v.success) return { error: firstIssue(v.error) };
-  return cancelAsStaff(id, `Declined: ${v.data.reason}`, { from: ["tentative", "requested"], audit: "appointment.decline", notice: "declined", chargeFee: false });
+  return cancelAsStaff(id, `Declined: ${v.data.reason}`, { from: ["tentative"], audit: "appointment.decline", notice: "declined", chargeFee: false });
 }
 
 /** Cancel a confirmed (or requested) appointment. No late-fee task unless staff tick "Charge late cancellation fee". */

@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/session";
 import { apptId } from "@/lib/appointments/input";
-import { guardianMayBook, portalMayChange } from "@/lib/appointments/rules";
+import { guardianMayBook, insideCancellationWindow, portalMayChange } from "@/lib/appointments/rules";
+import { formatZar } from "@/lib/money";
+import { getPractice } from "@/lib/practice";
 import { getSlots } from "@/lib/booking/availability";
 import { BOOKING_ERROR_TEXT, isBookingErrorCode } from "@/lib/booking/errors";
 import { durationLabel, formatLabel } from "@/lib/booking/labels";
@@ -43,6 +45,25 @@ export default async function ReschedulePage({ params, searchParams }: { params:
   if (appt.patients?.user_id !== me.userId) {
     const { data: g } = await sb.from("guardianships").select("permissions, valid_from, valid_to").eq("guardian_user_id", me.userId).eq("patient_id", appt.patient_id);
     if (!(g ?? []).some((x) => guardianMayBook(x, sastDate(now)))) redirect(`/portal/appointments/${appt.id}`);
+  }
+
+  // Policy first (0010): inside the cancellation window a patient cannot move the appointment, so no slot buttons are offered.
+  const practice = await getPractice();
+  const windowHours = practice?.cancellation_window_hours ?? 24;
+  const feeCents = practice?.late_cancel_fee_cents ?? 0;
+  if (insideCancellationWindow(new Date(appt.starts_at), now, windowHours)) {
+    return (
+      <>
+        <PageHeader title="Reschedule appointment" description={<Link href={`/portal/appointments/${appt.id}`}>Back to this appointment</Link>} />
+        <Notice tone="warning" title="This appointment cannot be moved online">
+          This appointment is inside the cancellation window ({windowHours} hours before it starts). To change it, cancel it{feeCents > 0 ? ` (a fee of ${formatZar(feeCents)} may apply)` : ""} or contact the practice.
+        </Notice>
+        <div className="flex flex-wrap gap-3">
+          <LinkButton href={`/portal/appointments/${appt.id}?confirm=cancel#cancel-panel`} variant="secondary">Cancel this appointment</LinkButton>
+          <LinkButton href={`/portal/appointments/${appt.id}`} variant="quiet">Keep the appointment</LinkButton>
+        </div>
+      </>
+    );
   }
 
   const range = bookingDateRange(now);

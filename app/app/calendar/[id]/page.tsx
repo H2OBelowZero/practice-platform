@@ -54,7 +54,9 @@ export default async function StaffAppointmentPage({ params, searchParams }: { p
   const t = appt.session_types;
   const name = appt.patients ? `${appt.patients.first_name} ${appt.patients.last_name}` : "Unknown patient";
   const st = appt.status;
-  const open = st === "tentative" || st === "requested";
+  const open = st === "tentative"; // the legacy "requested" status is unused in Phase 1 (0009 refuses requested -> confirmed)
+  const last = events[events.length - 1];
+  const newId = st === "cancelled" && last?.event === "rescheduled" ? apptId.safeParse(last.detail?.new_id).data : undefined; // moved: link to the replacement
   const back = calendarHref({ view: "week", date: sastDate(appt.starts_at) });
 
   return (
@@ -73,6 +75,7 @@ export default async function StaffAppointmentPage({ params, searchParams }: { p
           {t && <><dt className="text-ink-muted">Duration</dt><dd className="font-medium">{durationLabel(t.duration_min)}</dd>
                   <dt className="text-ink-muted">Format</dt><dd className="font-medium">{formatLabel(t.format)}</dd>
                   <dt className="text-ink-muted">Fee</dt><dd className="font-medium">{formatZar(t.fee_cents)}</dd></>}
+          {newId && <><dt className="text-ink-muted">Moved to</dt><dd className="font-medium"><Link href={`/app/calendar/${newId}`}>The new appointment</Link></dd></>}
           {st === "cancelled" && cancelReasonText(appt.cancel_reason) && <><dt className="text-ink-muted">Reason</dt><dd className="font-medium">{cancelReasonText(appt.cancel_reason)}</dd></>}
         </dl>
       </Card>
@@ -123,16 +126,16 @@ export default async function StaffAppointmentPage({ params, searchParams }: { p
         {(st === "confirmed" || open) && (
           <Card className="mt-4">
             <h3 className="mb-2 text-lg">Cancel this appointment</h3>
-            <p className="mb-4 text-ink-muted">The patient is emailed that it was cancelled. No fee is charged unless you tick the box.</p>
+            <p className="mb-4 text-ink-muted">The patient is emailed that it was cancelled.{fee > 0 ? " No fee is charged unless you tick the box." : ""}</p>
             <ActionForm action={cancelAppointmentStaff} args={[appt.id]} submitLabel="Cancel appointment" pendingLabel="Cancelling…" variant="danger">
               <Textarea id="cancel-reason" name="reason" label="Reason (optional)" rows={2} maxLength={500} hint="The patient may see this." />
-              <div className="mb-5 flex items-start gap-3">
+              {fee > 0 && <div className="mb-5 flex items-start gap-3">
                 <input id="chargeFee" name="chargeFee" type="checkbox" className="mt-1 h-6 w-6 shrink-0 accent-sage-700" />
                 <label htmlFor="chargeFee" className="font-medium">
-                  Charge late cancellation fee{fee > 0 ? ` (${formatZar(fee)})` : ""}
-                  <span className="block text-sm font-normal text-ink-muted">Creates a task to review the fee. Nothing is invoiced automatically.</span>
+                  Charge late cancellation fee ({formatZar(fee)})
+                  <span className="block text-sm font-normal text-ink-muted">Creates one task to review the fee. Nothing is invoiced automatically.</span>
                 </label>
-              </div>
+              </div>}
             </ActionForm>
           </Card>
         )}
