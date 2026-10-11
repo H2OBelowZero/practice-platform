@@ -1,4 +1,4 @@
-﻿# Practice Platform
+# Practice Platform
 
 Next.js 15 + Supabase app for a private psychologist practice.
 
