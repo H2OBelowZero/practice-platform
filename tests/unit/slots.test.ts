@@ -17,9 +17,19 @@ it("removes busy overlaps including buffer", () => {
   expect(s).toContain("2030-01-07T08:00:00.000Z");
 });
 
-it("hides past slots and non-working days", () => {
-  expect(generateSlots({ ...base, date: "2030-01-08", busy: [] })).toEqual([]);
-  expect(generateSlots({ ...base, now: new Date("2030-01-07T07:30:00Z"), date: "2030-01-07", busy: [] }).every(x => x > "2030-01-07T07:30:00Z")).toBe(true);
+it("hides non-working days", () => {
+  expect(generateSlots({ ...base, date: "2030-01-08", busy: [] })).toEqual([]); // Tuesday has no rule
+});
+
+it("hides past slots, and a slot starting exactly now", () => {
+  const at = (now: string) => generateSlots({ ...base, now: new Date(now), date: "2030-01-07", busy: [] });
+  expect(at("2030-01-07T07:30:00Z")).toEqual(["2030-01-07T08:00:00.000Z", "2030-01-07T09:00:00.000Z"]); // 06:00 and 07:00 are past
+  expect(at("2030-01-07T08:00:00Z")).toEqual(["2030-01-07T09:00:00.000Z"]); // now == slot start: that slot is gone
+  expect(at("2030-01-07T09:00:01Z")).toEqual([]);
+});
+
+it.each([[0, 0], [0, -5], [-10, 10], [NaN, 10]])("returns no slots (and does not loop) when duration %s + buffer %s is not positive", (durationMin, bufferMin) => {
+  expect(generateSlots({ ...base, durationMin, bufferMin, date: "2030-01-07", busy: [] })).toEqual([]);
 });
 
 it("uses the SAST calendar day, not the UTC day", () => {

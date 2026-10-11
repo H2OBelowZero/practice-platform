@@ -69,6 +69,38 @@ export async function signOut(): Promise<void> {
   redirect("/login");
 }
 
+// ---- registration ------------------------------------------------------------------------------------------------------------
+// Creates a PATIENT account only (the signup trigger ignores any role: 0006). Records no consent of any kind (spec section 6).
+
+const registerSchema = z.object({
+  name: z.string().trim().min(1, "Enter your full name.").max(100, "Use at most 100 characters for your name."),
+  email,
+  password: z.string().min(12, "Use at least 12 characters for your password.").max(72, "Use at most 72 characters for your password."),
+  next: z.string().max(1024).optional(),
+});
+
+export async function register(_prev: FormState, formData: FormData): Promise<FormState> {
+  const parsed = registerSchema.safeParse(raw(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0].message, email: String(formData.get("email") ?? "").slice(0, 254) };
+  }
+  const { name, password, next } = parsed.data;
+  const mail = parsed.data.email.toLowerCase();
+  const safe = safeNext(next, "");
+  // After the emailed link is used, /auth/callback sends the person on to `next` (e.g. the booking they were making).
+  const emailRedirectTo = `${appUrl()}/auth/callback${safe ? `?next=${encodeURIComponent(safe)}` : ""}`;
+
+  const sb = await supabaseServer();
+  const { error } = await sb.auth.signUp({ email: mail, password, options: { emailRedirectTo, data: { name } } });
+  if (error) {
+    if (error.status === 429) return { error: "Too many attempts. Wait a few minutes and try again.", email: mail };
+    if (error.code === "weak_password") return { error: "That password is too easy to guess. Choose a longer, less common one.", email: mail };
+    // Anything else (including "already registered") gets the same answer as success: the response must not reveal whether an account exists.
+    console.error("signUp failed:", error.status, error.code);
+  }
+  return { done: true };
+}
+
 // ---- password recovery -------------------------------------------------------------------------------------------------------
 
 export async function requestRecovery(_prev: FormState, formData: FormData): Promise<FormState> {

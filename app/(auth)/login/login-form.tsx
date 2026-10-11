@@ -16,7 +16,8 @@ export function LoginForm({ next }: { next?: string }) {
              defaultValue={state?.email} invalid={invalid} />
       <Field id="password" label="Password" type="password" autoComplete="current-password" required invalid={invalid} />
       <SubmitButton pendingLabel="Signing in…">Sign in</SubmitButton>
-      <p className="mt-4"><Link href="/recover" className="underline underline-offset-4">Forgotten your password?</Link></p>
+      <p className="mt-4"><Link href="/recover">Forgotten your password?</Link></p>
+      <p className="mt-2">New here? <Link href={next ? `/register?next=${encodeURIComponent(next)}` : "/register"}>Create an account</Link></p>
     </form>
   );
 }

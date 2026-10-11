@@ -11,6 +11,7 @@ function assertDate(date: string) {
 
 export function generateSlots(o: { date: string; rules: Rule[]; busy: Range[]; durationMin: number; bufferMin: number; now: Date }): string[] {
   assertDate(o.date);
+  if (!(o.durationMin + o.bufferMin > 0)) return []; // a zero/negative step would loop forever (also guards NaN)
   const dayStart = Date.parse(`${o.date}T00:00:00Z`) - SAST_MS;       // local midnight as an instant
   const weekday = new Date(dayStart + SAST_MS).getUTCDay();
   const step = (o.durationMin + o.bufferMin) * 60_000, dur = o.durationMin * 60_000, buf = o.bufferMin * 60_000;
