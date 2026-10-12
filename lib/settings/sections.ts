@@ -17,6 +17,16 @@ export const sectionHref = (key: SectionKey, notice?: string): string => `/app/s
 
 /** Only the practitioner changes settings. The admin (the receptionist) may manage blocked time and leave, and nothing else (RLS agrees). */
 export const SETTINGS_WRITER: Role = "psychologist";
+/** What the admin can see (and do) in each section: said honestly, because retention policies and the audit log are hidden from the admin by RLS. */
+export const adminSeesText = (key: SectionKey): string => ({
+  practice: "You can see all the practice details here.",
+  payment: "You can read the payment instructions that patients see, but not change them.",
+  "session-types": "You can see the session types, but not change them.",
+  hours: "You can see the working hours, but not change them.",
+  blocked: "You can add and remove blocked time and leave.",
+  retention: "Retention settings are visible to the practitioner only.",
+  information: "You can see the templates, staff and connections; the last scheduled run is visible to the practitioner only.",
+} satisfies Record<SectionKey, string>)[key];
 export const READ_ONLY_TEXT = "Only the practitioner can change settings";
 export const canEditSection = (role: Role, key: SectionKey): boolean => role === "psychologist" || (role === "admin" && key === "blocked");
 

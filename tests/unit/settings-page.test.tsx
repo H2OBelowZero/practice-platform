@@ -421,3 +421,33 @@ describe("actions: blocked time and retention", () => {
     expect(await updateRetention("nope", { retainYears: "5" })).toMatchObject({ error: expect.stringMatching(/could not find/) });
   });
 });
+
+describe("fix round 1: wording and keys", () => {
+  it("the working-hours page says appointments cannot run past 23:55", async () => {
+    expect(await page({ section: "hours" })).toContain("Appointments cannot run past 23:55.");
+  });
+  it("the admin banner says what the admin can see in each section, not 'everything'", async () => {
+    h.role = "admin";
+    const texts: Record<string, string> = {
+      practice: "You can see all the practice details", payment: "You can read the payment instructions", "session-types": "You can see the session types", hours: "You can see the working hours",
+      blocked: "You can add and remove blocked time and leave.", retention: "Retention settings are visible to the practitioner only", information: "the last scheduled run is visible to the practitioner only",
+    };
+    for (const [section, text] of Object.entries(texts)) {
+      const out = await page({ section });
+      expect(out, section).toContain("Only the practitioner can change settings");
+      expect(out, section).toContain(text);
+      expect(out, section).not.toContain("everything on this page");
+    }
+  });
+  it("the saved-data version is in the form keys: a changed saved day or retention row renders as a different form instance", async () => {
+    const { windowsKey } = await import("@/lib/settings/hours");
+    const { formKey } = await import("@/lib/settings/keys");
+    expect(windowsKey(1, [{ start: "08:00", end: "12:00" }])).not.toBe(windowsKey(1, [{ start: "08:00", end: "13:00" }]));
+    expect(formKey("clinical_notes", 10, true)).not.toBe(formKey("clinical_notes", 10, false));
+  });
+  it("a crafted day form gives a friendly message, not an exception", async () => {
+    const crafted = { start_0: ["x"], end_0: { a: 1 }, "start_-5": "08:00" } as unknown as Record<string, string>;
+    expect(await saveDay(1, crafted)).toMatchObject({ error: expect.any(String) });
+    expect(h.log).toEqual([]);
+  });
+});

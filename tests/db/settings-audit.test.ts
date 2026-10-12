@@ -289,6 +289,11 @@ describe("deactivating a session type (the settings page never deletes one)", ()
       await as(c, psy, "update session_types set active=false where id=$1", [t]);
       await expect(book("2031-03-17T08:00:00Z")).rejects.toThrow(/unknown_session_type/);
       expect((await c.query("select session_type_id from appointments where id=$1", [first])).rows[0].session_type_id).toBe(t);
+      // moving an existing appointment of an inactive type still works (reschedule_appointment has no active check); a NEW booking still raises
+      const moved = (await as(c, psy, "select reschedule_appointment($1,$2) id", [first, "2031-03-17T10:00:00Z"])).rows[0].id as string;
+      expect((await c.query("select session_type_id, status, starts_at from appointments where id=$1", [moved])).rows[0]).toMatchObject({ session_type_id: t, status: "confirmed" });
+      expect((await c.query("select status from appointments where id=$1", [first])).rows[0].status).toBe("cancelled");
+      await expect(book("2031-03-17T12:00:00Z")).rejects.toThrow(/unknown_session_type/);
       await as(c, psy, "update session_types set active=true where id=$1", [t]);
       await book("2031-03-17T08:00:00Z");
       // and a type that appointments refer to cannot be deleted at all

@@ -1,7 +1,7 @@
 import { requireRole } from "@/lib/auth/session";
 import { integrationStatus } from "@/lib/settings/env-status";
 import { loadBlocks, loadHealth, loadHours, loadPaymentInstructions, loadPractice, loadRetention, loadSessionTypes, loadStaff, loadTemplates } from "@/lib/settings/load";
-import { canEditSection, parseSection, SECTIONS, sectionHref, settingsNotice, type SectionKey } from "@/lib/settings/sections";
+import { adminSeesText, canEditSection, parseSection, SECTIONS, sectionHref, settingsNotice, type SectionKey } from "@/lib/settings/sections";
 import { supabaseServer } from "@/lib/supabase/server";
 import { BlockedSection, HoursSection, InformationSection, PaymentSection, PracticeSection, ReadOnlyNotice, RetentionSection, SessionTypesSection } from "@/components/settings/sections";
 import { LinkButton } from "@/components/ui/button";
@@ -56,7 +56,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader title="Settings" description="How the practice runs: details, sessions, hours and records. Only the practitioner can change most of it." />
       {notice && <Notice tone="success">{notice}</Notice>}
-      {!isPsychologist && <ReadOnlyNotice extra={section === "blocked" ? "You can add and remove blocked time and leave." : "You can see everything on this page, and add or remove blocked time and leave."} />}
+      {!isPsychologist && <ReadOnlyNotice extra={adminSeesText(section)} />}
 
       <nav aria-label="Settings sections" className="mb-6">
         <ul className="m-0 flex list-none flex-wrap gap-2 p-0">

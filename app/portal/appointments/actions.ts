@@ -73,7 +73,7 @@ export async function rescheduleAppointment(id: unknown, newStartIso: unknown): 
   if (!startInBookingWindow(startIso, new Date())) return { error: APPT_ERROR.unavailable };
 
   let slots: string[];
-  try { slots = await getSlots(appt.session_type_id, sastDate(startIso)); } catch { return { error: APPT_ERROR.generic }; }
+  try { slots = await getSlots(appt.session_type_id, sastDate(startIso), { includeInactive: true }); } catch { return { error: APPT_ERROR.generic }; }
   if (!slots.includes(startIso)) redirect(backToPicker(appt.id, startIso, "taken"));
 
   const moved = await sb.rpc("reschedule_appointment", { p_appt: appt.id, p_new_start: startIso });

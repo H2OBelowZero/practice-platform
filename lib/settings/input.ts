@@ -53,6 +53,14 @@ export const paymentSchema = z.object({
   confirmed: z.preprocess((v) => v === "on", z.literal(true, { error: "Tick the box to confirm you have checked the bank details." })),
 });
 
+/** The same checks as paymentSchema, run in the browser BEFORE the review panel opens (the server runs paymentSchema again). Null = fine. */
+export function paymentPrecheck(values: Record<string, string>): { error: string; field: string } | null {
+  const r = paymentSchema.safeParse(values);
+  if (r.success) return null;
+  const issue = r.error.issues[0];
+  return { error: issue?.message ?? "Please check the details.", field: String(issue?.path[0] ?? "") };
+}
+
 export const sessionTypeSchema = z.object({
   name: z.string({ error: "Enter a name for the session type." }).trim().min(1, "Enter a name for the session type.").max(LIMITS.name, `Keep the name under ${LIMITS.name} characters.`),
   durationMin: wholeNumber("the length in minutes", LIMITS.durationMin.min, LIMITS.durationMin.max),

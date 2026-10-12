@@ -7,7 +7,7 @@ import { EmergencyNotice } from "@/components/ui/emergency-notice";
 import { Input, Select, Textarea } from "@/components/ui/field";
 import { Switch } from "@/components/ui/switch";
 import { MAX_WINDOWS, type Win } from "@/lib/settings/hours";
-import { LIMITS } from "@/lib/settings/input";
+import { LIMITS, paymentPrecheck } from "@/lib/settings/input";
 import { addBlock, createSessionType, saveDay, updatePaymentInstructions, updatePractice, updateRetention, updateSessionType } from "@/app/app/settings/actions";
 
 // Settings forms. All use KeepForm, which keeps what was typed when the server answers with a message, and has noValidate: the server checks everything (Zod and the
@@ -88,7 +88,7 @@ function PaymentFields({ text, setText }: { text: string; setText: (s: string) =
 export function PaymentForm({ initial }: { initial: string }) {
   const [text, setText] = useState(initial);
   return (
-    <KeepForm action={updatePaymentInstructions} args={[]} submitLabel="Review and save" pendingLabel="Saving…"
+    <KeepForm action={updatePaymentInstructions} args={[]} submitLabel="Review and save" pendingLabel="Saving…" precheck={paymentPrecheck}
               confirm={{
                 title: "Check the new payment details",
                 body: (

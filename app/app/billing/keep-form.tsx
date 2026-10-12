@@ -13,10 +13,12 @@ export const FieldErrorContext = createContext<{ field?: string; error?: string 
  * with an error. A long invoice (several lines) must survive a validation message. Success redirects, as with ActionForm.
  * `confirm` adds an inline confirmation step (no browser dialog): the first submit shows the panel (focus moves to it), "Yes" sends the form.
  */
-export function KeepForm<A extends unknown[]>({ action, args, children, submitLabel, pendingLabel, variant, confirm }: {
+export function KeepForm<A extends unknown[]>({ action, args, children, submitLabel, pendingLabel, variant, confirm, precheck }: {
   action: (...a: [...A, Values]) => Promise<ActionState>; args: A; children?: React.ReactNode;
   submitLabel: string; pendingLabel?: string; variant?: ButtonVariant;
   confirm?: { title: string; body: React.ReactNode; yes: string; variant?: ButtonVariant };
+  /** Runs in the browser before the confirmation panel opens (or the form is sent); a returned message is shown like a server error and nothing opens. The server still checks everything. */
+  precheck?: (values: Values) => { error: string; field?: string } | null;
 }) {
   const [state, run, pending] = useActionState(async (_p: ActionState, fd: FormData): Promise<ActionState> => {
     const values: Values = {};
@@ -24,15 +26,27 @@ export function KeepForm<A extends unknown[]>({ action, args, children, submitLa
     return action(...args, values);
   }, null);
   const [confirming, setConfirming] = useState(false);
+  const [pre, setPre] = useState<ActionState>(null);
+  const shown = pre ?? state;
   const formRef = useRef<HTMLFormElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (confirming) panelRef.current?.focus(); }, [confirming]);
-  const send = () => { setConfirming(false); startTransition(() => run(new FormData(formRef.current!))); };
+  const send = () => { setConfirming(false); setPre(null); startTransition(() => run(new FormData(formRef.current!))); };
 
   return (
-    <FieldErrorContext.Provider value={{ field: state?.field, error: state?.error }}>
-      <form ref={formRef} noValidate onSubmit={(e) => { e.preventDefault(); if (confirm) setConfirming(true); else send(); }}>
-        <FormError message={state?.error} state={state} />
+    <FieldErrorContext.Provider value={{ field: shown?.field, error: shown?.error }}>
+      <form ref={formRef} noValidate onSubmit={(e) => {
+        e.preventDefault();
+        if (precheck) {
+          const values: Values = {};
+          for (const [k, v] of new FormData(formRef.current!).entries()) if (typeof v === "string") values[k] = v;
+          const problem = precheck(values);
+          if (problem) { setPre({ error: problem.error, field: problem.field }); return; }
+          setPre(null);
+        }
+        if (confirm) setConfirming(true); else send();
+      }}>
+        <FormError message={shown?.error} state={shown} />
         {children}
         {confirming && confirm ? (
           <div ref={panelRef} tabIndex={-1} role="group" aria-label={confirm.title} className="rounded-card border border-line-strong bg-sunk p-5">

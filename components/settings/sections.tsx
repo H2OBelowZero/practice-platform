@@ -10,7 +10,8 @@ import type { ConsentPurpose } from "@/lib/forms/validate";
 import { formatZar, formatZarInput } from "@/lib/money";
 import { clashText } from "@/lib/settings/blocks";
 import { PAYFAST_NOTIFY_PATH, type CronRun, type IntegrationStatus } from "@/lib/settings/env-status";
-import { describeDay, WEEK, type Win } from "@/lib/settings/hours";
+import { describeDay, WEEK, windowsKey, type Win } from "@/lib/settings/hours";
+import { formKey } from "@/lib/settings/keys";
 import type { BlockRow, PracticeRow, RetentionRow, SessionTypeRow, StaffRow, TemplateRow } from "@/lib/settings/load";
 import { READ_ONLY_TEXT, retentionLabel, retentionSummary, ROLE_LABEL, sortRetention } from "@/lib/settings/sections";
 import { sastDate, sastDateLabel, sastTime } from "@/lib/time";
@@ -39,7 +40,7 @@ export function PracticeSection({ practice, canEdit }: { practice: PracticeRow; 
     return (
       <Card>
         <h2 className="mb-4">Practice details</h2>
-        <PracticeForm initial={{
+        <PracticeForm key={formKey(practice.name, practice.registration_no, practice.hpcsa_no, practice.approval_mode, practice.cancellation_window_hours, practice.late_cancel_fee_cents, practice.vat_registered, practice.vat_rate, practice.crisis_text)} initial={{
           name: practice.name, registrationNo: practice.registration_no ?? "", hpcsaNo: practice.hpcsa_no ?? "", approvalMode: practice.approval_mode,
           cancellationWindowHours: String(practice.cancellation_window_hours), lateCancelFee: formatZarInput(practice.late_cancel_fee_cents),
           vatRegistered: practice.vat_registered, vatRate: String(practice.vat_rate).replace(".", ","), crisisText: practice.crisis_text,
@@ -77,7 +78,7 @@ export function PaymentSection({ text, canEdit }: { text: string; canEdit: boole
         <p>Every change is recorded in the audit log (who and when, never the text itself).</p>
       </Notice>
       {canEdit
-        ? <PaymentForm initial={text} />
+        ? <PaymentForm key={formKey(text)} initial={text} />
         : <><p className="mb-2 text-sm text-ink-muted">What patients are shown next to the online payment option:</p><pre className="whitespace-pre-wrap break-words rounded-xl border border-line bg-sunk p-4 font-sans">{text}</pre></>}
     </Card>
   );
@@ -105,7 +106,7 @@ export function SessionTypesSection({ types, canEdit }: { types: SessionTypeRow[
               {canEdit && (
                 <details className="mt-3">
                   <summary className="inline-flex min-h-11 cursor-pointer items-center text-blue-700 underline underline-offset-4">Edit<span className="sr-only"> {t.name}</span></summary>
-                  <div className="mt-3"><SessionTypeForm id={t.id} initial={typeInitial(t)} /></div>
+                  <div className="mt-3"><SessionTypeForm key={formKey(t.id, t.name, t.duration_min, t.fee_cents, t.format, t.buffer_min, t.active)} id={t.id} initial={typeInitial(t)} /></div>
                 </details>
               )}
             </li>
@@ -129,7 +130,7 @@ export function HoursSection({ days, canEdit }: { days: Record<number, Win[]>; c
       <h2 className="mb-2">Working hours</h2>
       <Notice tone="info" title="What a change affects">
         <p>Changes apply to future bookings only. Appointments that are already booked are not moved or cancelled, even if they now fall outside your hours.</p>
-        <p>Times are South African time. A day can have several windows, for example a morning and an afternoon. A day with no windows is closed.</p>
+        <p>Times are South African time. A day can have several windows, for example a morning and an afternoon. A day with no windows is closed. Appointments cannot run past 23:55.</p>
       </Notice>
       {canEdit && (
         <div className="mb-6">
@@ -143,7 +144,7 @@ export function HoursSection({ days, canEdit }: { days: Record<number, Win[]>; c
           <li key={d.weekday} className="rounded-xl border border-line p-4">
             <h3 className="mb-1">{d.label}</h3>
             {canEdit
-              ? <DayEditor weekday={d.weekday} label={d.label} initial={days[d.weekday] ?? []} />
+              ? <DayEditor key={windowsKey(d.weekday, days[d.weekday] ?? [])} weekday={d.weekday} label={d.label} initial={days[d.weekday] ?? []} />
               : <p>{describeDay(days[d.weekday] ?? [])}</p>}
           </li>
         ))}
@@ -212,7 +213,7 @@ export function RetentionSection({ rows, canEdit, visible }: { rows: RetentionRo
                   {canEdit && (
                     <details className="mt-3">
                       <summary className="inline-flex min-h-11 cursor-pointer items-center text-blue-700 underline underline-offset-4">Change<span className="sr-only"> {l.label}</span></summary>
-                      <div className="mt-3"><RetentionForm recordType={r.record_type} years={r.retain_years} hold={r.legal_hold} /></div>
+                      <div className="mt-3"><RetentionForm key={formKey(r.record_type, r.retain_years, r.legal_hold)} recordType={r.record_type} years={r.retain_years} hold={r.legal_hold} /></div>
                     </details>
                   )}
                 </li>

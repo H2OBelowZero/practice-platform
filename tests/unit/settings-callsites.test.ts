@@ -136,8 +136,20 @@ describe("inactive session types stay out of booking", () => {
     const book = strip(read("app", "(public)", "book", "page.tsx"));
     expect(book).toMatch(/from\("session_types"\)[^;]*\.eq\("active", true\)/);
     expect(strip(read("app", "app", "calendar", "new", "page.tsx"))).toMatch(/from\("session_types"\)[^;]*\.eq\("active", true\)/);
-    expect(strip(read("lib", "booking", "availability.ts"))).toMatch(/from\("session_types"\)[^;]*\.eq\("active", true\)/);
+    expect(strip(read("lib", "booking", "availability.ts"))).toMatch(/if \(!opts\.includeInactive\) \w+ = \w+\.eq\("active", true\)/); // the filter stays unless a caller explicitly opts out
     expect(read("supabase", "migrations", "0008_booking_hardening.sql")).toContain("from session_types where id = p_type and active");
+  });
+});
+
+describe("getSlots includeInactive is for rescheduling an existing appointment only", () => {
+  const callers = (dir: string) => files(join(root, dir)).filter((f) => /getSlots\(/.test(strip(readFileSync(f, "utf8"))));
+  it("exactly the three reschedule paths pass it, each with the appointment's own type", () => {
+    const withOpt = [...callers("app")].filter((f) => /includeInactive: true/.test(strip(readFileSync(f, "utf8")))).map(rel).sort();
+    expect(withOpt).toEqual(["/app/app/calendar/[id]/reschedule/page.tsx", "/app/portal/appointments/[id]/reschedule/page.tsx", "/app/portal/appointments/actions.ts"]);
+    for (const f of withOpt) expect(strip(readFileSync(join(root, f), "utf8")), f).toMatch(/getSlots\(appt\.session_type_id, .*includeInactive: true\s*\}\)/);
+  });
+  it("new bookings never pass it: /book, its action and calendar/new", () => {
+    for (const f of [["app", "(public)", "book", "page.tsx"], ["app", "(public)", "book", "actions.ts"], ["app", "app", "calendar", "new", "page.tsx"]]) expect(strip(read(...f)), f.join("/")).not.toContain("includeInactive");
   });
 });
 

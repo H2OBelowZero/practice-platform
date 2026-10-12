@@ -42,7 +42,7 @@ export default async function StaffReschedulePage({ params, searchParams }: { pa
   const date = realDateParam((await searchParams).date) ?? sastDate(appt.starts_at);
   let slots: string[] = [];
   let slotsFailed = false;
-  try { slots = await getSlots(appt.session_type_id, date); } catch { slotsFailed = true; }
+  try { slots = await getSlots(appt.session_type_id, date, { includeInactive: true }); } catch { slotsFailed = true; }
   const t = appt.session_types;
 
   return (

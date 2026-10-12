@@ -176,3 +176,29 @@ describe("integration status", () => {
     expect(cronRunFrom({ at: "2031-05-01T06:00:00Z", detail: null })).toEqual({ at: "2031-05-01T06:00:00Z", ok: null, errors: 0 });
   });
 });
+
+import { paymentPrecheck } from "@/lib/settings/input";
+import { adminSeesText } from "@/lib/settings/sections";
+
+describe("payment precheck (before the review panel)", () => {
+  it("asks for the tick and the text first, with the same wording as the server", () => {
+    expect(paymentPrecheck({ paymentInstructions: "Bank X", confirmed: "on" })).toBeNull();
+    expect(paymentPrecheck({ paymentInstructions: "Bank X" })).toEqual({ error: "Tick the box to confirm you have checked the bank details.", field: "confirmed" });
+    expect(paymentPrecheck({ paymentInstructions: "   ", confirmed: "on" })).toMatchObject({ field: "paymentInstructions" });
+    expect(paymentPrecheck({ paymentInstructions: "p".repeat(1501), confirmed: "on" })).toMatchObject({ field: "paymentInstructions" });
+    // whatever the precheck says, the schema says the same
+    for (const v of [{ paymentInstructions: "Bank X" }, { paymentInstructions: "", confirmed: "on" }, { paymentInstructions: "ok", confirmed: "on" }]) {
+      expect(paymentPrecheck(v as Record<string, string>) === null).toBe(paymentSchema.safeParse(v).success);
+    }
+  });
+});
+
+describe("what the admin sees, per section", () => {
+  it("never claims more than the admin can see", () => {
+    for (const k of SECTIONS.map((s) => s.key)) expect(adminSeesText(k), k).toBeTruthy();
+    expect(adminSeesText("blocked")).toBe("You can add and remove blocked time and leave.");
+    expect(adminSeesText("retention")).toMatch(/practitioner only/);
+    expect(adminSeesText("information")).toMatch(/last scheduled run.*practitioner only/);
+    for (const k of SECTIONS.map((s) => s.key)) expect(adminSeesText(k), k).not.toContain("everything");
+  });
+});

@@ -71,7 +71,7 @@ export default async function ReschedulePage({ params, searchParams }: { params:
   const dateOk = date !== undefined && isBookableDate(date, now);
   let slots: string[] = [];
   let slotsFailed = false;
-  if (dateOk) { try { slots = await getSlots(appt.session_type_id, date); } catch { slotsFailed = true; } }
+  if (dateOk) { try { slots = await getSlots(appt.session_type_id, date, { includeInactive: true }); } catch { slotsFailed = true; } }
   const error = isBookingErrorCode(sp.e) ? BOOKING_ERROR_TEXT[sp.e] : undefined;
   const t = appt.session_types;
 

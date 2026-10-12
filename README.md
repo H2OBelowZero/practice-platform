@@ -72,6 +72,9 @@ allow-list, and set `APP_URL` to the site's public origin (used for password-res
   "Possible duplicate patient: review and merge" task is raised when an email-matching row existed but could not be linked.
 - **Session limits**: at go-live set the Supabase session time-box and inactivity timeout (Authentication > Sessions;
   Pro plan feature) so idle staff sessions expire.
+  Consider enabling a short Supabase session timebox/inactivity timeout (Pro) because bank-detail edits (Settings >
+  Payment instructions) rely on the aal2 session: there is no separate step-up re-authentication in Phase 1, only the
+  multi-factor session, a confirmation tick, a review panel and the audit rows written by the database.
 - **Authorisation is not middleware**: `middleware.ts` only refreshes the session and bounces anonymous visitors. Every
   `/app` and `/portal` page, server action and route handler must itself call `requireRole` / `requireUser`
   (`lib/auth/session.ts`), which also sends staff without aal2 to `/mfa` and back to the page they wanted.

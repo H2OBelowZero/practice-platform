@@ -78,13 +78,23 @@ export const dayMinutes = (ws: Win[]): number => ws.reduce((n, w) => n + Math.ma
 /** "08:00 to 12:00, 13:00 to 17:00" or "Closed". */
 export const describeDay = (ws: Win[]): string => (ws.length ? ws.map((w) => `${w.start} to ${w.end}`).join(", ") : "Closed");
 
-/** The form fields start_0 / end_0 / start_1 ... of a day form, in order, until the first index with neither field. */
-export function windowsFromValues(values: Record<string, string>): Win[] {
-  const out: Win[] = [];
-  for (let i = 0; i < 40; i++) {
-    const s = values[`start_${i}`], e = values[`end_${i}`];
-    if (s === undefined && e === undefined) continue; // a removed row leaves a gap in the numbering
-    out.push({ start: (s ?? "").trim(), end: (e ?? "").trim() });
+/** A React key for one day's editor: changes when the saved windows change, so a second "Copy Monday" or a post-save render never shows stale rows. */
+export const windowsKey = (weekday: number, ws: Win[]): string => `${weekday}:${ws.map((w) => `${w.start}-${w.end}`).join("|")}`;
+
+/**
+ * The form fields start_N / end_N of a day form, in numeric order of N. Rows that were removed leave gaps and N keeps growing, so the SUBMITTED keys are walked
+ * (never a fixed range). Values are coerced with String() inside a guard: anything odd becomes text that validation rejects with a message, never an exception.
+ */
+export function windowsFromValues(values: unknown): Win[] {
+  if (!values || typeof values !== "object") return [];
+  const v = values as Record<string, unknown>;
+  const text = (x: unknown): string => { try { return typeof x === "string" ? x.trim() : x == null ? "" : String(x).trim(); } catch { return "?"; } };
+  const rows = new Map<number, { start?: unknown; end?: unknown }>();
+  for (const k of Object.keys(v)) {
+    const m = /^(start|end)_(\d{1,6})$/.exec(k);
+    if (!m) continue;
+    const n = Number(m[2]);
+    rows.set(n, { ...rows.get(n), [m[1]]: v[k] });
   }
-  return out;
+  return [...rows.entries()].sort((a, b) => a[0] - b[0]).map(([, r]) => ({ start: text(r.start), end: text(r.end) }));
 }

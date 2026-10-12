@@ -10,13 +10,18 @@ const hhmm = (t: string) => t.slice(0, 5); // Postgres time "08:00:00" -> "08:00
  * Free slots (ISO instants) for a session type on a SAST calendar day.
  * Works for anonymous visitors: session_types and availability_rules are public-read, and busy_ranges is a
  * security-definer function that returns time ranges only (no patient data). Throws on malformed input (Zod).
+ * An inactive session type offers no slots (new bookings), unless the caller opts in with includeInactive: true. ONLY the reschedule paths do, with the
+ * appointment's own session_type_id: an appointment already booked keeps its type when the type is switched off, and must stay movable
+ * (reschedule_appointment has no active check). tests/unit/settings-callsites.test.ts pins the callers.
  */
-export async function getSlots(typeId: string, date: string): Promise<string[]> {
+export async function getSlots(typeId: string, date: string, opts: { includeInactive?: boolean } = {}): Promise<string[]> {
   const q = slotQuerySchema.parse({ typeId, date });
   const sb = await supabaseServer();
 
+  let typeQuery = sb.from("session_types").select("duration_min, buffer_min").eq("id", q.typeId);
+  if (!opts.includeInactive) typeQuery = typeQuery.eq("active", true);
   const [type, rules] = await Promise.all([
-    sb.from("session_types").select("duration_min, buffer_min").eq("id", q.typeId).eq("active", true).maybeSingle(),
+    typeQuery.maybeSingle(),
     sb.from("availability_rules").select("weekday, start_time, end_time"),
   ]);
   if (type.error || rules.error) throw new Error("availability_unavailable");
