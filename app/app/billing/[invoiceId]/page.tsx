@@ -5,6 +5,7 @@ import { invoiceAuditFilter, invoiceEventText, isOverdue, METHOD_LABEL, PAYER_LA
 import { billingNotice } from "@/lib/billing/notices";
 import { defaultDueDate, uuid } from "@/lib/billing/input";
 import { outstandingCents } from "@/lib/billing/outstanding";
+import { claimableCents, isCurrentMember } from "@/lib/claims/rules";
 import { portionSummary } from "@/lib/billing/portions";
 import { formatZar, formatZarInput } from "@/lib/money";
 import { supabaseServer } from "@/lib/supabase/server";
@@ -56,13 +57,14 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const inv = data as Inv | null;
   if (!inv) notFound();
 
-  const [linesR, paysR, creditsR, reasonsR, claimsR, patR, evR] = await Promise.all([
+  const [linesR, paysR, creditsR, reasonsR, claimsR, patR, memberR, evR] = await Promise.all([
     sb.from("invoice_lines").select("id, description, quantity, unit_cents").eq("invoice_id", inv.id).order("position").order("id"),
     sb.from("payments").select("id, method, reference, gateway_ref, amount_cents, received_on, recorded_by").eq("invoice_id", inv.id).eq("status", "succeeded").order("received_on").order("created_at"),
     sb.from("credit_notes").select("id, amount_cents, portion, created_at").eq("invoice_id", inv.id).order("created_at"), // reason / created_by are not granted on the table (0018)
     write ? sb.rpc("credit_note_details", { p_invoice: inv.id }) : Promise.resolve({ data: null, error: null }), // psychologist / admin only; the bookkeeper sees no reasons (R39)
     sb.from("claim_summary").select("id, status, claimed_cents, approved_cents").eq("invoice_id", inv.id),
     write ? sb.from("patients").select("first_name, last_name").eq("id", inv.patient_id).maybeSingle() : Promise.resolve({ data: null }),
+    write && inv.payer_type !== "self" ? sb.from("medical_aid_members").select("valid_from, valid_to").eq("patient_id", inv.patient_id) : Promise.resolve({ data: null }), // current membership decides whether a claim can be opened
     me.role === "psychologist" ? sb.from("audit_log").select("id, actor_id, role, action, at").or(invoiceAuditFilter(inv.id)).order("id", { ascending: false }).limit(100) : Promise.resolve({ data: null }),
   ]);
   const lines = (linesR.data ?? []) as Line[];
@@ -71,6 +73,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const credits = ((creditsR.data ?? []) as unknown as Credit[]).map((c) => ({ ...c, reason: reasonOf.get(c.id) }));
   const claims = (claimsR.data ?? []) as Claim[];
   const events = (evR.data ?? []) as Ev[];
+  const members = (memberR.data ?? []) as { valid_from: string | null; valid_to: string | null }[];
   const loadFailed = !!(linesR.error || paysR.error || creditsR.error || reasonsR.error);
 
   const paid = pays.reduce((s, p) => s + p.amount_cents, 0);
@@ -90,6 +93,13 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const nameOf = new Map((profs ?? []).map((p) => [p.user_id as string, (p.display_name as string | null) || "Unnamed user"]));
 
   const voidable = write && (draft || inv.status === "issued");
+
+  // Open a claim: staff only, an open medical aid / split invoice with some of the scheme portion still unclaimed and a current membership
+  const canOpenClaim = write && open && inv.payer_type !== "self" && claimableCents(inv.scheme_portion_cents, claims) > 0;
+  const hasCurrentMember = members.some((m) => isCurrentMember(m, today));
+  const claimBlock = !canOpenClaim ? null : hasCurrentMember
+    ? <LinkButton href={`/app/claims/new?invoice=${inv.id}`} variant="secondary">Open medical-aid claim</LinkButton>
+    : <p className="text-ink-muted">To open a claim, this patient needs a current medical aid membership. <Link href={`/app/patients/${inv.patient_id}?tab=medical-aid`}>Add or update it on the patient&apos;s Medical aid tab</Link>.</p>;
   const confirmVoid = voidable && sp.confirm === "void";
 
   return (
@@ -262,16 +272,18 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
       {(inv.payer_type !== "self" || claims.length > 0) && !draft && (
         <section aria-labelledby="claims-h" className="mb-6">
           <h2 id="claims-h" className="mb-4">Medical aid claims</h2>
-          {claims.length === 0 ? <p className="text-ink-muted">No claim has been started for this invoice.</p> : (
-            <ul className="m-0 grid list-none gap-3 p-0">
+          {claims.length === 0 ? <p className="mb-4 text-ink-muted">No claim has been started for this invoice.</p> : (
+            <ul className="m-0 mb-4 grid list-none gap-3 p-0">
               {claims.map((c) => (
                 <li key={c.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface p-4">
                   <StatusChip status={c.status} />
                   <span>Claimed {formatZar(c.claimed_cents)}{c.approved_cents !== null ? `, approved ${formatZar(c.approved_cents)}` : ""}</span>
+                  {write && <Link href={`/app/claims/${c.id}`}>Open claim</Link>}
                 </li>
               ))}
             </ul>
           )}
+          {claimBlock}
         </section>
       )}
 
