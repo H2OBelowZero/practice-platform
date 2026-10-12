@@ -12,7 +12,9 @@ describe("billing database errors in plain language", () => {
     ["invoice_frozen", "invoice_frozen"], ["invoice_lines_frozen", "invoice_lines_frozen"], ["invoice_void_is_final", "invoice_void_is_final"],
     ["invalid_invoice_transition", "invalid_invoice_transition"], ["invoice_has_payments", "invoice_has_payments"], ["invoice_has_open_claims", "invoice_has_open_claims"],
     ["invoice_not_payable", "invoice_not_payable"], ["invoice_not_creditable", "invoice_not_creditable"], ["overpay", "overpay"],
-    ["credit_exceeds_outstanding", "credit_exceeds_outstanding"], ["ref_required", "ref_required"], ["future_date", "future_date"], ["invalid_method", "invalid_method"],
+    ["credit_exceeds_outstanding", "credit_exceeds_outstanding"],
+    ["credit_exceeds_scheme_portion", "credit_exceeds_scheme_portion"], ["credit_exceeds_patient_portion", "credit_exceeds_patient_portion"], ["portion_required", "portion_required"], ["portion_not_allowed", "portion_not_allowed"],
+    ["ref_required", "ref_required"], ["future_date", "future_date"], ["invalid_method", "invalid_method"],
     ["invalid_amount", "invalid_amount"], ["reason_required", "reason_required"], ["possible_duplicate", "possible_duplicate"], ["unknown_invoice", "unknown_invoice"],
     ["forbidden", "forbidden"], ['new row violates row-level security policy for table "credit_notes"', "forbidden"], ["permission denied for function record_payment", "forbidden"],
   ];
@@ -39,7 +41,7 @@ describe("billing database errors in plain language", () => {
 
   it("every exception the billing SQL can raise is mapped (so none shows as 'something went wrong' by accident)", () => {
     const dir = join(__dirname, "..", "..", "supabase", "migrations");
-    const sql = ["0005_billing.sql", "0015_invoice_per_appointment.sql", "0016_billing_fixes.sql"].map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
+    const sql = ["0005_billing.sql", "0015_invoice_per_appointment.sql", "0016_billing_fixes.sql", "0017_credit_note_portion.sql"].map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
     const raised = [...new Set([...sql.matchAll(/raise exception '([a-z_0-9]+)'/g)].map((m) => m[1]))];
     // codes the billing UI never triggers from a staff session (claims, remittance, ledger internals) are listed here on purpose
     const NOT_FROM_THESE_SCREENS = new Set([

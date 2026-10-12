@@ -30,8 +30,9 @@ describe("field errors name the control (for aria-invalid / aria-describedby)", 
     expect(field(parsePaymentForm(pay({ amount: "0" }), TODAY))).toBe("amount");
     expect(field(parsePaymentForm(pay({ reference: "" }), TODAY))).toBe("reference");
     expect(field(parsePaymentForm(pay({ receivedOn: "2031-01-01" }), TODAY))).toBe("receivedOn");
-    expect(field(parseCreditNoteForm({ amount: "x", reason: "r" }))).toBe("amount");
-    expect(field(parseCreditNoteForm({ amount: "1", reason: "" }))).toBe("reason");
+    expect(field(parseCreditNoteForm({ amount: "x", reason: "r" }, "self"))).toBe("amount");
+    expect(field(parseCreditNoteForm({ amount: "1", reason: "" }, "self"))).toBe("reason");
+    expect(field(parseCreditNoteForm({ amount: "1", reason: "r" }, "split"))).toBe("portion");
   });
   it("the parsed values carry the payer and the trimmed due date the action sends to the database", () => {
     const r = parseInvoiceForm(form({ payer: "medical_aid", dueDate: " 2030-02-15 " }), TODAY);

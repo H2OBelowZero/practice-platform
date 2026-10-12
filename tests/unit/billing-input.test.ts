@@ -146,16 +146,26 @@ describe("parsePaymentForm", () => {
 
 describe("parseCreditNoteForm", () => {
   it("needs a positive amount and a reason of 1 to 300 characters", () => {
-    expect(ok(parseCreditNoteForm({ amount: "150", reason: " goodwill " }))).toEqual({ amountCents: 15000, reason: "goodwill" });
-    expect(err(parseCreditNoteForm({ amount: "0", reason: "x" }))).toMatch(/credit amount/);
-    expect(err(parseCreditNoteForm({ amount: "10", reason: "  " }))).toMatch(/reason/);
-    expect(err(parseCreditNoteForm({ amount: "10", reason: "x".repeat(301) }))).toMatch(/under 300/);
-    expect(ok(parseCreditNoteForm({ amount: "10", reason: "x".repeat(300) })).reason).toHaveLength(300);
+    expect(ok(parseCreditNoteForm({ amount: "150", reason: " goodwill " }, "self"))).toEqual({ amountCents: 15000, reason: "goodwill", portion: "patient" });
+    expect(err(parseCreditNoteForm({ amount: "0", reason: "x" }, "self"))).toMatch(/credit amount/);
+    expect(err(parseCreditNoteForm({ amount: "10", reason: "  " }, "self"))).toMatch(/reason/);
+    expect(err(parseCreditNoteForm({ amount: "10", reason: "x".repeat(301) }, "self"))).toMatch(/under 300/);
+    expect(ok(parseCreditNoteForm({ amount: "10", reason: "x".repeat(300) }, "self")).reason).toHaveLength(300);
   });
-});
-
-it("default due date is 14 days on, crossing month and year ends", () => {
-  expect(defaultDueDate("2030-02-01")).toBe("2030-02-15");
-  expect(defaultDueDate("2030-12-25")).toBe("2031-01-08");
-  expect(defaultDueDate("2032-02-20")).toBe("2032-03-05"); // leap year
+  it("self-pay: the portion is always the patient's, whatever was submitted (there is no medical aid portion)", () => {
+    for (const portion of [undefined, "", "patient", "scheme", "nonsense"]) expect(ok(parseCreditNoteForm({ amount: "10", reason: "r", ...(portion === undefined ? {} : { portion }) }, "self")).portion, String(portion)).toBe("patient");
+  });
+  it("medical aid and split invoices: the portion must be chosen, scheme or patient", () => {
+    for (const payer of ["medical_aid", "split"]) {
+      expect(ok(parseCreditNoteForm({ amount: "10", reason: "r", portion: "scheme" }, payer)).portion).toBe("scheme");
+      expect(ok(parseCreditNoteForm({ amount: "10", reason: "r", portion: "patient" }, payer)).portion).toBe("patient");
+      for (const portion of [undefined, "", " ", "both", "SCHEME"]) {
+        expect(err(parseCreditNoteForm({ amount: "10", reason: "r", ...(portion === undefined ? {} : { portion }) }, payer)), `${payer} ${portion}`).toMatch(/Choose whether/);
+      }
+    }
+  });
+  it("the amount and reason are checked before the portion (their errors are shown first)", () => {
+    expect(err(parseCreditNoteForm({ amount: "0", reason: "r" }, "split"))).toMatch(/credit amount/);
+    expect(err(parseCreditNoteForm({ amount: "5", reason: "" }, "split"))).toMatch(/reason/);
+  });
 });

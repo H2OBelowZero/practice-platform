@@ -3,6 +3,7 @@ import { computeInvoice } from "@/lib/billing/invoice";
 import { formatZar, parseZarToCents } from "@/lib/money";
 import { addDays, isRealDate } from "@/lib/time";
 import type { Values } from "@/lib/appointments/types";
+import type { CreditPortion } from "@/lib/billing/types";
 
 // Everything a staff member types into the billing forms is parsed here, on the server, with Zod. Money is parsed from the typed
 // text into integer cents (never floats). The forms never submit totals: the server computes every figure (computeInvoice).
@@ -129,12 +130,18 @@ export function parsePaymentForm(values: Values, today: string): Result<PaymentI
   return { ok: true, value: { method: method.data, amountCents, reference: ref === "" ? null : ref, receivedOn, allowDuplicate: tick(values.allowDuplicate) } };
 }
 
-export type CreditNoteInput = { amountCents: number; reason: string };
-export function parseCreditNoteForm(values: Values): Result<CreditNoteInput> {
+export type CreditNoteInput = { amountCents: number; reason: string; portion: CreditPortion };
+/**
+ * A credit note form. `payer` is the invoice's payer_type, read from the database by the action (never from the form): a self-pay invoice
+ * has no medical aid portion, so its portion is always 'patient' whatever was submitted; a medical aid / split invoice needs a choice.
+ */
+export function parseCreditNoteForm(values: Values, payer: string): Result<CreditNoteInput> {
   const amountCents = fieldMoney(values.amount);
   if (amountCents === null || amountCents <= 0) return fail("Enter the credit amount in rand, for example 150 or 150,00.", "amount");
   const reason = (values.reason ?? "").trim();
   if (reason === "") return fail("Give a reason for the credit note.", "reason");
   if (reason.length > 300) return fail("Keep the reason under 300 characters.", "reason");
-  return { ok: true, value: { amountCents, reason } };
+  const choice = (values.portion ?? "").trim();
+  if (payer !== "self" && choice !== "scheme" && choice !== "patient") return fail("Choose whether this writes off the medical aid shortfall or is a discount for the patient.", "portion");
+  return { ok: true, value: { amountCents, reason, portion: payer === "self" ? "patient" : (choice as CreditPortion) } };
 }

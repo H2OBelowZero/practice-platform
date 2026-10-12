@@ -148,22 +148,32 @@ export async function recordPayment(rawId: unknown, values: Values): Promise<Pay
   return detail(id.data, "payment");
 }
 
-/** A credit note: psychologist only (RLS and the guard trigger say so too). The amount cannot exceed what is still owed. */
+/**
+ * A credit note: psychologist only (RLS and the guard trigger say so too). The amount cannot exceed what is still owed.
+ * The portion (R40) is 'scheme' (write off the medical aid shortfall) or 'patient' (discount for the patient); the invoice's payer type is read
+ * from the database here, so a self-pay invoice always gets 'patient'. The database enforces the per-portion caps.
+ */
 export async function addCreditNote(rawId: unknown, values: Values): Promise<ActionState> {
   await requireRole(["psychologist"]);
   const id = uuid.safeParse(rawId);
   if (!id.success) return generic;
-  const c = parseCreditNoteForm(values);
+  const sb = await supabaseServer();
+  const { data: payerRow, error: payerErr } = await sb.from("invoices").select("payer_type").eq("id", id.data).maybeSingle();
+  if (payerErr) return generic;
+  if (!payerRow) return { error: BILLING_ERROR.unknown_invoice };
+  const c = parseCreditNoteForm(values, String(payerRow.payer_type));
   if (!c.ok) return { error: c.error, field: c.field };
 
-  const sb = await supabaseServer();
   const bal = await loadOutstanding(sb, id.data).catch(() => undefined);
   if (bal === undefined) return generic;
   if (!bal) return { error: BILLING_ERROR.unknown_invoice };
   if (bal.status !== "issued" && bal.status !== "part_paid") return { error: BILLING_ERROR.invoice_not_creditable };
   if (c.value.amountCents > bal.outstandingCents) return { error: `A credit note cannot be more than what is still owed (${formatZar(bal.outstandingCents)}).`, field: "amount" };
 
-  const { error } = await sb.from("credit_notes").insert({ invoice_id: id.data, amount_cents: c.value.amountCents, reason: c.value.reason });
-  if (error) return { error: billingErrorText(error.message) };
+  const { error } = await sb.from("credit_notes").insert({ invoice_id: id.data, amount_cents: c.value.amountCents, reason: c.value.reason, portion: c.value.portion });
+  if (error) {
+    const code = billingErrorCode(error.message);
+    return { error: billingErrorText(error.message), field: code === "credit_exceeds_scheme_portion" || code === "credit_exceeds_patient_portion" ? "amount" : undefined };
+  }
   return detail(id.data, "credit");
 }

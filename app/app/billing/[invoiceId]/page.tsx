@@ -29,7 +29,7 @@ type Inv = {
 };
 type Line = { id: string; description: string; quantity: number; unit_cents: number };
 type Pay = { id: string; method: string; reference: string | null; gateway_ref: string | null; amount_cents: number; received_on: string; recorded_by: string | null };
-type Credit = { id: string; amount_cents: number; reason?: string; created_at: string };
+type Credit = { id: string; amount_cents: number; portion: string; reason?: string; created_at: string };
 type Claim = { id: string; status: string; claimed_cents: number; approved_cents: number | null };
 type Ev = { id: number; actor_id: string | null; role: string | null; action: string; at: string };
 
@@ -59,7 +59,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const [linesR, paysR, creditsR, claimsR, patR, evR] = await Promise.all([
     sb.from("invoice_lines").select("id, description, quantity, unit_cents").eq("invoice_id", inv.id).order("position").order("id"),
     sb.from("payments").select("id, method, reference, gateway_ref, amount_cents, received_on, recorded_by").eq("invoice_id", inv.id).eq("status", "succeeded").order("received_on").order("created_at"),
-    sb.from("credit_notes").select(write ? "id, amount_cents, reason, created_at" : "id, amount_cents, created_at").eq("invoice_id", inv.id).order("created_at"),
+    sb.from("credit_notes").select(write ? "id, amount_cents, portion, reason, created_at" : "id, amount_cents, portion, created_at").eq("invoice_id", inv.id).order("created_at"),
     sb.from("claim_summary").select("id, status, claimed_cents, approved_cents").eq("invoice_id", inv.id),
     write ? sb.from("patients").select("first_name, last_name").eq("id", inv.patient_id).maybeSingle() : Promise.resolve({ data: null }),
     me.role === "psychologist" ? sb.from("audit_log").select("id, actor_id, role, action, at").or(invoiceAuditFilter(inv.id)).order("id", { ascending: false }).limit(100) : Promise.resolve({ data: null }),
@@ -75,7 +75,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const credited = credits.reduce((s, c) => s + c.amount_cents, 0);
   const open = inv.status === "issued" || inv.status === "part_paid";
   const outstanding = open ? outstandingCents({ totalCents: inv.total_cents, creditCents: credited, paidCents: paid }) : 0;
-  const sum = portionSummary({ status: inv.status, totalCents: inv.total_cents, schemeCents: inv.scheme_portion_cents, patientCents: inv.patient_portion_cents, creditCents: credited, payments: pays.map((p) => ({ method: p.method, amountCents: p.amount_cents })) });
+  const sum = portionSummary({ status: inv.status, totalCents: inv.total_cents, schemeCents: inv.scheme_portion_cents, patientCents: inv.patient_portion_cents, credits: credits.map((c) => ({ portion: c.portion, amountCents: c.amount_cents })), payments: pays.map((p) => ({ method: p.method, amountCents: p.amount_cents })) });
   const overdue = isOverdue(inv, today);
   const patient = patR.data as { first_name: string; last_name: string } | null;
   const notice = billingNotice(sp.notice);
@@ -171,17 +171,16 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               <caption className="sr-only">Who should pay what, and what has been received</caption>
               <thead className="bg-sunk text-sm text-ink-muted"><tr>
                 <th scope="col" className={TH}>Portion</th><th scope="col" className={`${TH} text-right`}>Expected</th>
-                <th scope="col" className={`${TH} text-right`}>Received</th><th scope="col" className={`${TH} text-right`}>Expected less received</th>
+                <th scope="col" className={`${TH} text-right`}>Received</th><th scope="col" className={`${TH} text-right`}>Credit notes</th><th scope="col" className={`${TH} text-right`}>Still owed</th>
               </tr></thead>
               <tbody>
-                <tr className="border-t border-line"><th scope="row" className="px-4 py-3 font-medium">Medical aid</th><td className="px-4 py-3 text-right">{formatZar(sum.schemeExpectedCents)}</td><td className="px-4 py-3 text-right">{formatZar(sum.schemePaidCents)}</td><td className="px-4 py-3 text-right">{sum.perPortion ? formatZar(sum.perPortion.schemeCents) : "-"}</td></tr>
-                <tr className="border-t border-line"><th scope="row" className="px-4 py-3 font-medium">Patient</th><td className="px-4 py-3 text-right">{formatZar(sum.patientExpectedCents)}</td><td className="px-4 py-3 text-right">{formatZar(sum.patientPaidCents)}</td><td className="px-4 py-3 text-right">{sum.perPortion ? formatZar(sum.perPortion.patientCents) : "-"}</td></tr>
-                <tr className="border-t border-line"><th scope="row" className="px-4 py-3 font-medium">Credit notes</th><td className="px-4 py-3 text-right">-</td><td className="px-4 py-3 text-right">-</td><td className="px-4 py-3 text-right">{credited ? `-${formatZar(credited)}` : formatZar(0)}</td></tr>
-                <tr className="border-t border-line bg-sunk"><th scope="row" className="px-4 py-3 font-semibold">Outstanding overall</th><td className="px-4 py-3 text-right">-</td><td className="px-4 py-3 text-right">-</td><td className="px-4 py-3 text-right font-semibold">{draft || inv.status === "void" ? "-" : formatZar(sum.outstandingCents)}</td></tr>
+                <tr className="border-t border-line"><th scope="row" className="px-4 py-3 font-medium">Medical aid</th><td className="px-4 py-3 text-right">{formatZar(sum.schemeExpectedCents)}</td><td className="px-4 py-3 text-right">{formatZar(sum.schemePaidCents)}</td><td className="px-4 py-3 text-right">{sum.schemeCreditCents ? `-${formatZar(sum.schemeCreditCents)}` : formatZar(0)}</td><td className="px-4 py-3 text-right">{sum.perPortion ? formatZar(sum.perPortion.schemeCents) : "-"}</td></tr>
+                <tr className="border-t border-line"><th scope="row" className="px-4 py-3 font-medium">Patient</th><td className="px-4 py-3 text-right">{formatZar(sum.patientExpectedCents)}</td><td className="px-4 py-3 text-right">{formatZar(sum.patientPaidCents)}</td><td className="px-4 py-3 text-right">{sum.patientCreditCents ? `-${formatZar(sum.patientCreditCents)}` : formatZar(0)}</td><td className="px-4 py-3 text-right">{sum.perPortion ? formatZar(sum.perPortion.patientCents) : "-"}</td></tr>
+                <tr className="border-t border-line bg-sunk"><th scope="row" className="px-4 py-3 font-semibold">Outstanding overall</th><td className="px-4 py-3 text-right">-</td><td className="px-4 py-3 text-right">-</td><td className="px-4 py-3 text-right">-</td><td className="px-4 py-3 text-right font-semibold">{draft || inv.status === "void" ? "-" : formatZar(sum.outstandingCents)}</td></tr>
               </tbody>
             </table>
           </div>
-          <p className="mt-2 text-sm text-ink-muted">Credit notes (for example writing off what the medical aid did not pay) belong to the invoice as a whole, not to one portion, so the split is only shown while there are none. The overall outstanding is always total less credit notes less everything received.</p>
+          <p className="mt-2 text-sm text-ink-muted">Each credit note is for one portion: writing off what the medical aid did not pay, or a discount for the patient. The patient can pay online once the medical aid portion has been paid or written off.</p>
         </section>
       )}
 
@@ -237,7 +236,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
             <ul className="m-0 mb-4 grid list-none gap-3 p-0">
               {credits.map((c) => (
                 <li key={c.id} className="rounded-xl border border-line bg-surface p-4">
-                  <p className="font-medium">{formatZar(c.amount_cents)}</p>
+                  <p className="font-medium">{formatZar(c.amount_cents)}{inv.payer_type !== "self" && <span className="font-normal text-ink-muted"> · {c.portion === "scheme" ? "Medical aid shortfall written off" : "Discount or write-off for the patient"}</span>}</p>
                   <p>{write ? c.reason : "-"}</p>
                   <p className="text-sm text-ink-muted">{sastDateLabel(c.created_at)}</p>
                 </li>
@@ -250,8 +249,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               <p className="mb-4 text-ink-muted">Reduces what is owed (for example a discount or a corrected fee). It cannot be more than the {formatZar(outstanding)} still owed, and it cannot be undone.</p>
               <KeepForm action={addCreditNote} args={[inv.id]} submitLabel="Add credit note" pendingLabel="Adding…"
                 confirm={{ title: "Add this credit note?", yes: "Yes, add the credit note",
-                  body: <p>A credit note cannot be changed or removed. It reduces what is owed on the whole invoice, and if it covers everything still owed on an unpaid invoice the invoice becomes void.</p> }}>
-                <CreditFields />
+                  body: <p>A credit note cannot be changed or removed. It reduces what is owed on this invoice (against the portion you chose), and if it covers everything still owed on an unpaid invoice the invoice becomes void.</p> }}>
+                <CreditFields payer={inv.payer_type} />
               </KeepForm>
             </Card>
           )}
