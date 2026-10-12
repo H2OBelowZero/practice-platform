@@ -55,28 +55,22 @@ begin
   return new; end $$;
 
 -- ---- set_consent ------------------------------------------------------------------------------------------------------------
--- 0004's set_consent plus: a NON-STAFF grant must name a submitted form of this patient whose template declares the purpose
--- (consent_needs_submission / consent_not_in_template), so the only way a patient or guardian can give a consent is by submitting the form.
--- Withdrawals stay free for the patient and guardian (no submission needed); staff and the system keep their old latitude.
-create or replace function set_consent(p_patient uuid, p_purpose text, p_granted boolean, p_submission uuid) returns void
+-- The write itself lives in _set_consent_core (internal: nobody can execute it, the definer functions below call it as the owner).
+-- set_consent keeps its public signature and adds the rules for NON-STAFF callers: a grant must name a submitted form of this patient whose
+-- template declares the purpose (consent_needs_submission / consent_not_in_template), so the only way a patient or guardian can give a consent
+-- by this door is by submitting the form. Withdrawals stay free for the patient and guardian. Staff and the system keep their old latitude.
+-- The one other door is accept_booking_terms() below, which can record financial_terms only, from the booking flow.
+create function _set_consent_core(p_patient uuid, p_purpose text, p_granted boolean, p_submission uuid, p_extra jsonb) returns void
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare prev consents; cur consents; v_version int; v_status text; v_found boolean;
-        v_staff boolean := auth.uid() is null or coalesce(auth_role()::text, '') in ('psychologist','admin');
 begin
-  if not v_staff and not can_access_forms(p_patient) then raise exception 'forbidden'; end if;
   if p_purpose is null or p_purpose not in ('treatment','privacy_notice','telehealth','financial_terms','share_referrer','share_insurer') then
     raise exception 'invalid_purpose'; end if;
   if p_granted is null then raise exception 'invalid_granted'; end if;
-  if p_granted and not v_staff and p_submission is null then raise exception 'consent_needs_submission'; end if;
   if p_submission is not null then
     select template_version, status into v_version, v_status from form_submissions where id = p_submission and patient_id = p_patient;
     if not found then raise exception 'submission_mismatch'; end if;
     if v_status <> 'submitted' then raise exception 'submission_not_submitted'; end if;
-    if p_granted and not v_staff and not exists (
-         select 1 from form_submissions s join form_templates t on t.id = s.template_id,
-                jsonb_array_elements(case when jsonb_typeof(t.schema -> 'fields') = 'array' then t.schema -> 'fields' else '[]'::jsonb end) f
-          where s.id = p_submission and f ->> 'consentPurpose' = p_purpose) then
-      raise exception 'consent_not_in_template'; end if;
   end if;
   perform pg_advisory_xact_lock(hashtextextended(p_patient::text || p_purpose, 0));
   select * into prev from consents where patient_id = p_patient and purpose = p_purpose;
@@ -86,6 +80,7 @@ begin
     values (p_patient, p_purpose, p_granted, case when p_granted then now() end, case when not p_granted then now() end,
             case when p_granted then p_submission end, case when p_granted then v_version end);
   elsif p_granted then
+    -- a (re-)grant is a fresh agreement when it was not granted, or when it is backed by a different submission / template version
     if not prev.granted or (p_submission is not null and (p_submission is distinct from prev.form_submission_id or v_version is distinct from prev.template_version)) then
       update consents set granted = true, granted_at = now(), withdrawn_at = null, form_submission_id = p_submission, template_version = v_version where id = prev.id;
     end if;
@@ -98,8 +93,47 @@ begin
   perform audit_write('consent.'||case when p_granted then 'grant' else 'withdraw' end,'consents',p_patient,jsonb_build_object(
     'purpose', p_purpose, 'granted', p_granted, 'template_version', cur.template_version, 'form_submission_id', cur.form_submission_id,
     'previous_granted', case when v_found then prev.granted end, 'previous_granted_at', prev.granted_at, 'previous_withdrawn_at', prev.withdrawn_at,
-    'acted_by_role', coalesce(auth_role()::text, 'system')));
+    'acted_by_role', coalesce(auth_role()::text, 'system')) || coalesce(p_extra, '{}'::jsonb));
 end $$;
+revoke execute on function _set_consent_core(uuid, text, boolean, uuid, jsonb) from public, anon, authenticated, service_role;
+
+create or replace function set_consent(p_patient uuid, p_purpose text, p_granted boolean, p_submission uuid) returns void
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_status text;
+        v_staff boolean := auth.uid() is null or coalesce(auth_role()::text, '') in ('psychologist','admin');
+begin
+  if not v_staff and not can_access_forms(p_patient) then raise exception 'forbidden'; end if;
+  if p_purpose is null or p_purpose not in ('treatment','privacy_notice','telehealth','financial_terms','share_referrer','share_insurer') then
+    raise exception 'invalid_purpose'; end if;
+  if p_granted is null then raise exception 'invalid_granted'; end if;
+  if p_granted and not v_staff then
+    if p_submission is null then raise exception 'consent_needs_submission'; end if;
+    select status into v_status from form_submissions where id = p_submission and patient_id = p_patient;
+    if not found then raise exception 'submission_mismatch'; end if;
+    if v_status <> 'submitted' then raise exception 'submission_not_submitted'; end if;
+    if not exists (
+         select 1 from form_submissions s join form_templates t on t.id = s.template_id,
+                jsonb_array_elements(case when jsonb_typeof(t.schema -> 'fields') = 'array' then t.schema -> 'fields' else '[]'::jsonb end) f
+          where s.id = p_submission and f ->> 'consentPurpose' = p_purpose) then
+      raise exception 'consent_not_in_template'; end if;
+  end if;
+  perform _set_consent_core(p_patient, p_purpose, p_granted, p_submission, null);
+end $$;
+
+-- The booking page's checkbox. Records ONLY financial_terms as granted (no submission), for staff or whoever may book for this patient (the same
+-- check book_appointment makes: the patient, or a current guardian holding permissions.book). Idempotent; the audit row carries the terms in force.
+create function accept_booking_terms(p_patient uuid) returns void
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare pr practices;
+begin
+  if auth.uid() is null then raise exception 'forbidden'; end if;
+  perform assert_patient_access(p_patient);
+  select * into pr from practices limit 1;
+  perform _set_consent_core(p_patient, 'financial_terms', true, null, jsonb_build_object(
+    'via', 'booking', 'cancellation_window_hours', pr.cancellation_window_hours, 'late_cancel_fee_cents', pr.late_cancel_fee_cents));
+end $$;
+revoke execute on function accept_booking_terms(uuid) from public, anon;
+grant execute on function accept_booking_terms(uuid) to authenticated, service_role;
 
 -- ---- restricted templates ---------------------------------------------------------------------------------------------------
 -- A template whose schema says "restricted": true holds clinical history. Reading the template itself stays open to every signed-in

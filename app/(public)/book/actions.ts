@@ -46,8 +46,9 @@ export async function bookAppointment(input: unknown): Promise<BookState> {
   if (patient.error || !patient.data) return { error: BOOKING_ERROR_TEXT.generic };
   const patientId = patient.data as string;
 
-  // The checkbox is the financial-terms acceptance: recorded separately, as its own consent purpose.
-  const consent = await sb.rpc("set_consent", { p_patient: patientId, p_purpose: "financial_terms", p_granted: true, p_submission: null });
+  // The checkbox is the financial-terms acceptance: recorded separately, as its own consent purpose. accept_booking_terms (0012) is the booking flow's
+  // own door: the general consent function refuses a patient's grant that no submitted form backs, and this function can record financial_terms and nothing else.
+  const consent = await sb.rpc("accept_booking_terms", { p_patient: patientId });
   if (consent.error) return { error: BOOKING_ERROR_TEXT.generic };
 
   const booked = await sb.rpc("book_appointment", { p_patient: patientId, p_type: typeId, p_start: startIso }); // status is derived by the DB
