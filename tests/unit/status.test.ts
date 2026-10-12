@@ -46,9 +46,9 @@ it("formats rand", () => {
 it("navigation is filtered by role", () => {
   const labels = (r: Parameters<typeof staffNav>[0]) => staffNav(r).map((i) => i.label);
   expect(labels("bookkeeper")).toEqual(["Billing", "Reports"]);
-  expect(labels("psychologist")).not.toContain("Settings");
-  expect(labels("psychologist")).toEqual(["Dashboard", "Calendar", "Patients", "Tasks", "Billing", "Claims", "Reports", "Audit log"]);
-  expect(labels("admin")).toEqual(["Dashboard", "Calendar", "Patients", "Tasks", "Billing", "Claims", "Reports"]);
+  expect(labels("psychologist")).toEqual(["Dashboard", "Calendar", "Patients", "Tasks", "Billing", "Claims", "Reports", "Audit log", "Settings"]);
+  expect(labels("admin")).toEqual(["Dashboard", "Calendar", "Patients", "Tasks", "Billing", "Claims", "Reports", "Settings"]); // read-only for the admin, except blocked time
+  for (const r of ["bookkeeper", "associate", "patient", "guardian"] as const) expect(labels(r)).not.toContain("Settings");
   expect(labels("bookkeeper")).not.toContain("Dashboard");
   expect(labels("bookkeeper")).not.toContain("Tasks");
   expect(labels("associate")).toEqual([]);

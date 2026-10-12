@@ -2,7 +2,7 @@ import type { Role } from "@/lib/auth/roles";
 import type { IconName } from "@/components/ui/icon";
 
 export type NavItem = { href: string; label: string; icon: IconName };
-// ready: false = the page does not exist yet, so the link is hidden (Settings arrives in Task 16c; flip it to ready and extend the tests there)
+// ready: false = the page does not exist yet, so the link is hidden (every page exists as of Task 16c)
 type Def = NavItem & { roles: Role[]; phone?: boolean; ready?: false };
 
 
@@ -19,7 +19,7 @@ const STAFF: Def[] = [
   { href: "/app/claims", label: "Claims", icon: "doc", roles: ["psychologist", "admin"] },
   { href: "/app/reports", label: "Reports", icon: "chart", roles: ["psychologist", "admin", "bookkeeper"], phone: true },
   { href: "/app/audit", label: "Audit log", icon: "shield", roles: ["psychologist"] },
-  { href: "/app/settings", label: "Settings", icon: "gear", roles: ["psychologist", "admin"], ready: false },
+  { href: "/app/settings", label: "Settings", icon: "gear", roles: ["psychologist", "admin"] },
 ];
 
 const PORTAL: NavItem[] = [
