@@ -106,6 +106,19 @@ anonymous, write no audit row (log flooding) and only log a fixed reason code to
 400 means refused, 500 means PayFast should retry (PayFast unreachable, database error). The checkout always bills the whole
 outstanding balance; part payments come from manual and medical-aid recording.
 
+### The patient / guardian Payments pages (`/portal/payments`)
+
+Patients and guardians (a guardian needs `permissions.pay`) see their issued invoices, what is outstanding, payments and receipts, all read with
+their own session so row-level security decides what arrives. "Pay now" is offered per invoice by `payNowAllowed()` (`lib/billing/pay-now.ts`,
+R40): self-pay invoices always; medical aid / split invoices only once the medical aid side is settled (scheme remittances plus credit notes
+marked "medical aid shortfall" cover the scheme portion) and what is left is the patient's own part. The server action `startPayfastCheckout`
+re-reads everything through RLS, recomputes that verdict and the amount (the whole outstanding balance, never a number from the browser; the
+amount the page showed is only used to refuse a stale click), builds the signed form with the signed-in user's own name and email, and the page
+POSTs it to PayFast. The return URL page (`?paid=<invoice id>`) shows stored status only ("We're confirming your payment" or "Paid, thank you");
+only the signed ITN records money. Bank details for EFT come from `practices.payment_instructions` (plain text; the psychologist edits it in the
+settings task; default "Please contact the practice for EFT details."). With PayFast not configured (no merchant id/key, no passphrase outside
+the sandbox, no `APP_URL` in production) the pages show "Online payment is not available right now" instead of a button.
+
 ### Payments that no longer fit the invoice (reconciliation)
 
 A genuine payment can arrive for an invoice that no longer takes it: paid twice, voided, a credit note or a medical-aid remittance
