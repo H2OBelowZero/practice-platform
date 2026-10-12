@@ -1,3 +1,4 @@
+import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadOutstanding } from "@/lib/billing/outstanding";
 import { payfastValidate } from "@/lib/payments/payfast";
@@ -19,6 +20,17 @@ export function makeItnDeps(service: SupabaseClient, env: ItnDeps["env"], valida
       const { data, error } = await service.from("payments").select("invoice_id,amount_cents,method").eq("gateway_ref", ref).maybeSingle();
       if (error) throw new Error(`payments lookup: ${error.code ?? ""} ${error.message}`);
       return data && { invoiceId: String(data.invoice_id), amountCents: Number(data.amount_cents), method: String(data.method) };
+    },
+    async unreconciledExists(pf) {
+      const { data, error } = await service.from("tasks").select("id").eq("source", `payfast_unreconciled:${pf}`).maybeSingle();
+      if (error) throw new Error(`tasks lookup: ${error.code ?? ""} ${error.message}`);
+      return !!data;
+    },
+    async raiseUnreconciled({ invoiceId, pfPaymentId, amountCents, outstandingCents, reason }) {
+      const { error } = await service.rpc("raise_payfast_unreconciled", {
+        p_invoice: invoiceId, p_pf_payment_id: pfPaymentId, p_amount_cents: amountCents, p_outstanding_cents: outstandingCents, p_reason: reason,
+      });
+      if (error) throw new Error(`raise_payfast_unreconciled failed: ${error.code ?? ""} ${error.message}`);
     },
     async recordPayment({ invoiceId, amountCents, ref }) {
       const { error } = await service.rpc("record_payment", { p_invoice: invoiceId, p_method: "payfast", p_amount: amountCents, p_ref: ref, p_by: null });

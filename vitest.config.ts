@@ -1,6 +1,7 @@
 import { defineConfig } from "vitest/config";
 import path from "path";
-const alias = { "@": path.resolve(__dirname) };
+// `server-only` throws outside a Server Component bundle; tests import server modules directly
+const alias = { "@": path.resolve(__dirname), "server-only": path.resolve(__dirname, "tests/stubs/server-only.ts") };
 export default defineConfig({
   // tsconfig keeps "jsx": "preserve" for Next; the unit tests that render components to static markup need the automatic runtime
   oxc: { jsx: { runtime: "automatic" } },

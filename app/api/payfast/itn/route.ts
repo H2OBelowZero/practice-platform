@@ -38,7 +38,7 @@ async function readCapped(req: Request): Promise<string | null> {
 export async function POST(req: Request) {
   const sourceIp = clientIp(req);
   const rawBody = await readCapped(req);
-  const env = { merchantId: process.env.PAYFAST_MERCHANT_ID?.trim(), passphrase: process.env.PAYFAST_PASSPHRASE?.trim() };
+  const env = { merchantId: process.env.PAYFAST_MERCHANT_ID?.trim(), passphrase: process.env.PAYFAST_PASSPHRASE?.trim(), sandbox: process.env.PAYFAST_SANDBOX === "true" };
   // an oversize body is still run through the core (which rejects and audits it) with a body that is over the limit
   const body = rawBody ?? "x".repeat(MAX_BODY_BYTES + 1);
   try {

@@ -108,7 +108,13 @@ describe("buildCheckout", () => {
     expect(signature).toBe(md5(str));
     expect(str).toContain("name_first=Zo%C3%AB+O%27Neil"); // apostrophe is encoded, as PHP does
   });
-  it("works without a passphrase", () => {
+  it.each(["", "   "])("refuses to build a live checkout without a passphrase (%j): the signature would be unkeyed", (pp) => {
+    env(); vi.stubEnv("PAYFAST_SANDBOX", "false"); vi.stubEnv("PAYFAST_PASSPHRASE", pp);
+    expect(() => buildCheckout(o)).toThrow(/PAYFAST_PASSPHRASE/);
+    vi.stubEnv("PAYFAST_SANDBOX", ""); vi.stubEnv("NODE_ENV", "production");
+    expect(() => buildCheckout(o)).toThrow(/PAYFAST_PASSPHRASE/);
+  });
+  it("the sandbox may build a checkout without a passphrase", () => {
     env(); vi.stubEnv("PAYFAST_PASSPHRASE", "");
     const { signature, ...rest } = buildCheckout(o).fields;
     expect(signature).toBe(md5(Object.entries(rest).map(([k, v]) => `${k}=${phpUrlencode(v)}`).join("&")));

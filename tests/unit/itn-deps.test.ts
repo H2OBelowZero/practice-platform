@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { makeItnDeps } from "@/lib/payments/itn-deps";
 
 /** R34 call-site audit: the exact DB calls the ITN makes, named parameters included, against 0005_billing.sql / 0007_audit_app.sql. */
-function fake(res: { rpc?: Record<string, { data?: unknown; error?: { code?: string; message: string } | null }>; ref?: unknown; refErr?: boolean }) {
+function fake(res: { rpc?: Record<string, { data?: unknown; error?: { code?: string; message: string } | null }>; ref?: unknown; refErr?: boolean; task?: unknown; taskErr?: boolean }) {
   const log: { fn: string; args: unknown }[] = [];
   const client = {
     from(t: string) {
@@ -11,6 +11,7 @@ function fake(res: { rpc?: Record<string, { data?: unknown; error?: { code?: str
       return { select: (cols: string) => ({ eq: (c: string, v: string) => {
         log.push({ fn: `select:${t}:${cols}:${c}`, args: v });
         if (t === "payments") return { maybeSingle: async () => (res.refErr ? { data: null, error: { code: "X", message: "bad" } } : { data: res.ref ?? null, error: null }) };
+        if (t === "tasks") return { maybeSingle: async () => (res.taskErr ? { data: null, error: { code: "X", message: "tasks bad" } } : { data: res.task ?? null, error: null }) };
         if (t === "invoices") return { maybeSingle: async () => ({ data: { id: v, status: "issued", total_cents: 100000 }, error: null }) };
         return Promise.resolve({ data: [{ amount_cents: 5000 }], error: null });
       } }) };
@@ -48,6 +49,22 @@ describe("makeItnDeps issues exactly the documented DB calls", () => {
     expect(log).toContainEqual({ fn: "select:payments:invoice_id,amount_cents,method:gateway_ref", args: "PF-77" });
     expect(await makeItnDeps(fake({}).client, env, noValidate).loadPaymentByRef("PF-0")).toBeNull();
     await expect(makeItnDeps(fake({ refErr: true }).client, env, noValidate).loadPaymentByRef("x")).rejects.toThrow(/bad/);
+  });
+  it("reconciliation task lookup by source payfast_unreconciled:<pf_payment_id>", async () => {
+    const { client, log } = fake({ task: { id: "t1" } });
+    expect(await makeItnDeps(client, env, noValidate).unreconciledExists("1089250")).toBe(true);
+    expect(log).toContainEqual({ fn: "select:tasks:id:source", args: "payfast_unreconciled:1089250" });
+    expect(await makeItnDeps(fake({}).client, env, noValidate).unreconciledExists("1")).toBe(false);
+    await expect(makeItnDeps(fake({ taskErr: true }).client, env, noValidate).unreconciledExists("1")).rejects.toThrow(/tasks bad/);
+  });
+  it("raise_payfast_unreconciled: named params p_invoice, p_pf_payment_id, p_amount_cents, p_outstanding_cents, p_reason (SQL: uuid, text, int, int, text)", async () => {
+    const { client, log } = fake({});
+    await makeItnDeps(client, env, noValidate).raiseUnreconciled({ invoiceId: "i-1", pfPaymentId: "77", amountCents: 95000, outstandingCents: 0, reason: "invoice_not_payable" });
+    expect(log).toEqual([{ fn: "rpc:raise_payfast_unreconciled", args: { p_invoice: "i-1", p_pf_payment_id: "77", p_amount_cents: 95000, p_outstanding_cents: 0, p_reason: "invoice_not_payable" } }]);
+  });
+  it("raise_payfast_unreconciled failure throws (the core answers 500)", async () => {
+    const { client } = fake({ rpc: { raise_payfast_unreconciled: { error: { code: "P0001", message: "unknown_invoice" } } } });
+    await expect(makeItnDeps(client, env, noValidate).raiseUnreconciled({ invoiceId: "i", pfPaymentId: "1", amountCents: 1, outstandingCents: 0, reason: "overpay" })).rejects.toThrow(/unknown_invoice/);
   });
   it("invoice balance: invoices(id,status,total_cents), credit_notes(amount_cents) and rpc invoice_paid_cents(p_invoice)", async () => {
     const { client, log } = fake({});

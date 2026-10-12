@@ -33,27 +33,32 @@ function body(over: Record<string, string> = {}, o: { pp?: string | undefined; s
 }
 
 type Calls = string[];
-function mk(over: Partial<ItnDeps> & { outstanding?: number; invStatus?: string; invoice?: null; existing?: Awaited<ReturnType<ItnDeps["loadPaymentByRef"]>> } = {}) {
+type Raised = Parameters<ItnDeps["raiseUnreconciled"]>[0];
+function mk(over: Partial<ItnDeps> & { outstanding?: number; invStatus?: string; invoice?: null; existing?: Awaited<ReturnType<ItnDeps["loadPaymentByRef"]>>; raisedBefore?: boolean } = {}) {
   const calls: Calls = [];
-  const audits: { action: string; detail: Record<string, string> }[] = [];
+  const raised: Raised[] = [];
+  const audits: { action: string; detail: Record<string, string | number> }[] = [];
   const deps: ItnDeps = {
     env: { merchantId: "10000100", passphrase: PP },
     async validate() { calls.push("validate"); return true; },
     async loadInvoice(id) { calls.push("loadInvoice"); return over.invoice === null ? null : { id, status: over.invStatus ?? "issued", outstandingCents: over.outstanding ?? 95000 }; },
     async loadPaymentByRef(ref) { calls.push("loadPaymentByRef:" + ref); return over.existing ?? null; },
+    async unreconciledExists(pf) { calls.push("unreconciledExists:" + pf); return over.raisedBefore ?? false; },
+    async raiseUnreconciled(a) { calls.push("raise"); raised.push(a); },
     async recordPayment(a) { calls.push(`record:${a.invoiceId}:${a.amountCents}:${a.ref}`); return { ok: true }; },
     async audit(e) { audits.push(e); },
     ...over,
   };
-  return { deps, calls, audits };
+  return { deps, calls, audits, raised };
 }
 const run = (b: string, d = mk(), ip = PF_IP) => processItn(d.deps, { rawBody: b, sourceIp: ip }).then((r) => ({ r, ...d }));
+const noMoney = (calls: string[]) => !calls.some((c) => c.startsWith("record:"));
 
 describe("happy path", () => {
   it("records a genuine COMPLETE ITN exactly once with ref PF-<pf_payment_id>", async () => {
     const { r, calls, audits } = await run(body());
     expect(r).toEqual({ status: 200, body: "OK", outcome: "recorded" });
-    expect(calls).toEqual(["loadInvoice", "loadPaymentByRef:PF-1089250", "validate", `record:${INV}:95000:PF-1089250`]);
+    expect(calls).toEqual(["loadInvoice", "loadPaymentByRef:PF-1089250", "unreconciledExists:1089250", "validate", `record:${INV}:95000:PF-1089250`]);
     expect(audits).toEqual([]);
   });
   it("verifies the signature in received order including empty fields, and unicode values", async () => {
@@ -62,8 +67,8 @@ describe("happy path", () => {
   it("also accepts the empty-skipping signature variant", async () => {
     expect((await run(body({}, { skipEmpty: true }))).r.outcome).toBe("recorded");
   });
-  it("works with no passphrase configured", async () => {
-    const d = mk({ env: { merchantId: "10000100" } });
+  it("sandbox may run without a passphrase", async () => {
+    const d = mk({ env: { merchantId: "10000100", sandbox: true } });
     expect((await run(body({}, { pp: undefined }), d)).r.outcome).toBe("recorded");
   });
   it("signature hex is case-insensitive", async () => {
@@ -77,12 +82,36 @@ describe("happy path", () => {
   });
 });
 
+describe("no passphrase outside the sandbox fails closed", () => {
+  const spy = async <T,>(fn: () => Promise<T>) => {
+    const seen: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => { seen.push(a.join(" ")); };
+    try { return { out: await fn(), seen }; } finally { console.error = orig; }
+  };
+  it.each([[undefined], [""]])("production (passphrase %j) -> 500 misconfigured, nothing looked up or audited, fixed console line", async (pp) => {
+    // the attacker computes a valid unkeyed signature: it must still not be accepted
+    const { out, seen } = await spy(() => run(body({}, { pp: undefined }), mk({ env: { merchantId: "10000100", passphrase: pp } })));
+    expect(out.r).toEqual({ status: 500, body: "error", outcome: "misconfigured" });
+    expect(out.calls).toEqual([]);
+    expect(out.audits).toEqual([]);
+    expect(seen).toEqual(["payfast: passphrase missing"]);
+  });
+  it("is checked right after the size/parse checks", async () => {
+    expect((await run("", mk({ env: { merchantId: "m" } }))).r.outcome).toBe("bad_body");
+    expect((await run(body(), mk({ env: { merchantId: "m" } }))).r.outcome).toBe("misconfigured");
+  });
+  it("sandbox without a passphrase still rejects a signature made with some passphrase", async () => {
+    expect((await run(body(), mk({ env: { merchantId: "10000100", sandbox: true } }))).r.outcome).toBe("bad_signature");
+  });
+});
+
 describe("check order (R36)", () => {
   it("1 body: too large (> 10 KB) is rejected before anything else runs", async () => {
     const { r, calls, audits } = await run(body({ item_name: "x".repeat(MAX_BODY_BYTES) }));
     expect(r).toEqual({ status: 400, body: "rejected", outcome: "body_too_large" });
     expect(calls).toEqual([]);
-    expect(audits).toEqual([{ action: "payfast.itn.rejected", detail: { reason: "body_too_large" } }]);
+    expect(audits).toEqual([]); // anonymous: no audit row
   });
   it("1 body: exactly 10 KB passes the size check", async () => {
     const b = "a=" + "x".repeat(MAX_BODY_BYTES - 2);
@@ -110,6 +139,19 @@ describe("check order (R36)", () => {
       expect(calls).toEqual([]); // nothing was looked up or validated
     }
   });
+  it("1-2 rejections before the signature is verified write NO audit row (log flooding), only a fixed console code", async () => {
+    const seen: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => { seen.push(a.join(" ")); };
+    try {
+      for (const [b, reason] of [["", "bad_body"], ["a=1&a=2", "bad_body"], ["x".repeat(MAX_BODY_BYTES + 1), "body_too_large"], [body({}, { sig: "0".repeat(32) }), "bad_signature"], [body({ m_payment_id: "EVIL" }, { sig: "0".repeat(32) }), "bad_signature"]] as const) {
+        const { r, audits } = await run(b, mk(), "1.2.3.4");
+        expect(r.outcome).toBe(reason);
+        expect(audits, reason).toEqual([]);
+      }
+    } finally { console.error = orig; }
+    expect(seen).toEqual(["payfast itn rejected: bad_body", "payfast itn rejected: bad_body", "payfast itn rejected: body_too_large", "payfast itn rejected: bad_signature", "payfast itn rejected: bad_signature"]);
+  });
   it("2 signature: a signature computed without the configured passphrase is refused", async () => {
     expect((await run(body({}, { pp: undefined }))).r.outcome).toBe("bad_signature");
   });
@@ -124,18 +166,20 @@ describe("check order (R36)", () => {
   });
   it("3 IP: outside the PayFast ranges, signature valid", async () => {
     for (const ip of ["1.2.3.4", "", "::1", "197.97.145.160", "undefined"]) {
-      const { r, calls } = await run(body(), mk(), ip);
+      const { r, calls, audits } = await run(body(), mk(), ip);
       expect(r, ip).toMatchObject({ status: 400, outcome: "bad_ip" });
       expect(calls).toEqual([]);
+      expect(audits).toEqual([{ action: "payfast.itn.rejected", detail: { reason: "bad_ip" } }]); // signature was valid: audited
     }
   });
   it("signature is checked before the IP (a forged body from a bad IP reports bad_signature)", async () => {
     expect((await run(body({}, { sig: "0".repeat(32) }), mk(), "1.2.3.4")).r.outcome).toBe("bad_signature");
   });
   it("4 merchant: a different merchant_id is rejected, even correctly signed", async () => {
-    const { r, calls } = await run(body({ merchant_id: "10000101" }));
+    const { r, calls, audits } = await run(body({ merchant_id: "10000101" }));
     expect(r).toMatchObject({ status: 400, outcome: "bad_merchant" });
     expect(calls).toEqual([]);
+    expect(audits).toEqual([{ action: "payfast.itn.rejected", detail: { reason: "bad_merchant" } }]);
   });
   it("4 merchant: missing merchant_id is rejected", async () => {
     const pairs = base().filter(([k]) => k !== "merchant_id");
@@ -203,20 +247,17 @@ describe("7 payment_status", () => {
 });
 
 describe("8 amount must equal what is outstanding", () => {
-  it.each(["949.99", "950.01", "950.000", "950.0", "950", "9.5e2", "abc", "", "-950.00", "+950.00", "0.00", "950,00", " 950.00", "0950.001", "1e3", "NaN", "9".repeat(30) + ".00"])(
-    "amount_gross %j -> 400 amount_mismatch (validate never called)", async (a) => {
-      const { r, calls } = await run(body({ amount_gross: a }));
+  it.each(["950.000", "950.0", "950", "9.5e2", "abc", "", "-950.00", "+950.00", "0.00", "950,00", " 950.00", "0950.001", "1e3", "NaN", "9".repeat(30) + ".00", "21474836.48"])(
+    "an amount that cannot be read or stored (%j) -> 400 amount_mismatch, no PayFast call, no task", async (a) => {
+      const { r, calls, raised } = await run(body({ amount_gross: a }));
       expect(r, a).toMatchObject({ status: 400, outcome: "amount_mismatch" });
       expect(calls).not.toContain("validate");
-      expect(calls.some((c) => c.startsWith("record:"))).toBe(false);
+      expect(calls).not.toContain("raise");
+      expect(noMoney(calls)).toBe(true);
+      expect(raised).toEqual([]);
     });
-  it("a part-paid invoice must be paid for exactly what is left", async () => {
-    expect((await run(body({ amount_gross: "600.00" }), mk({ outstanding: 60000 }))).r.outcome).toBe("recorded");
-    expect((await run(body({ amount_gross: "950.00" }), mk({ outstanding: 60000 }))).r.outcome).toBe("amount_mismatch");
-  });
-  it("an already-paid invoice (outstanding 0) with a NEW ref is refused", async () => {
-    expect((await run(body({ pf_payment_id: "999" }), mk({ outstanding: 0 }))).r.outcome).toBe("amount_mismatch");
-    expect((await run(body({ pf_payment_id: "999", amount_gross: "0.00" }), mk({ outstanding: 0 }))).r.outcome).toBe("amount_mismatch");
+  it("a part-paid invoice is paid for exactly what is left", async () => {
+    expect((await run(body({ amount_gross: "600.00" }), mk({ outstanding: 60000, invStatus: "part_paid" }))).r.outcome).toBe("recorded");
   });
   it("amounts are parsed by string, free of float error", async () => {
     for (const [s, c] of [["0.29", 29], ["1.15", 115], ["4.35", 435], ["19999.99", 1999999], ["8.20", 820]] as const) expect(parseAmountCents(s)).toBe(c);
@@ -229,7 +270,7 @@ describe("9 PayFast server-side validate", () => {
     const d = mk({ async validate() { return false; } });
     const { r, calls } = await run(body(), d);
     expect(r).toMatchObject({ status: 400, outcome: "validation_failed" });
-    expect(calls.some((c) => c.startsWith("record:"))).toBe(false);
+    expect(noMoney(calls)).toBe(true);
   });
   it("is given the raw body untouched", async () => {
     let seen = "";
@@ -240,22 +281,79 @@ describe("9 PayFast server-side validate", () => {
   it("a PayFast outage (throw) -> 500 so PayFast retries; nothing recorded", async () => {
     const { r, calls } = await run(body(), mk({ async validate() { throw new Error("timeout"); } }));
     expect(r).toMatchObject({ status: 500, outcome: "validate_unavailable" });
-    expect(calls.some((c) => c.startsWith("record:"))).toBe(false);
+    expect(noMoney(calls)).toBe(true);
+  });
+});
+
+describe("genuine payments the invoice no longer accepts are reconciled, not lost", () => {
+  const scenarios: [string, Parameters<typeof mk>[0], Record<string, string>, string, number][] = [
+    ["double payment: invoice already paid, new pf_payment_id", { invStatus: "paid", outstanding: 0 }, { pf_payment_id: "2000001" }, "invoice_not_payable", 0],
+    ["scheme remittance between checkout and ITN (less is outstanding now)", { invStatus: "part_paid", outstanding: 20000 }, {}, "amount_mismatch", 20000],
+    ["a credit note reduced the balance", { invStatus: "issued", outstanding: 50000 }, {}, "amount_mismatch", 50000],
+    ["void invoice", { invStatus: "void", outstanding: 95000 }, {}, "invoice_not_payable", 95000],
+    ["draft invoice", { invStatus: "draft", outstanding: 95000 }, {}, "invoice_not_payable", 95000],
+    ["more outstanding than was paid", { invStatus: "issued", outstanding: 100000 }, {}, "amount_mismatch", 100000],
+  ];
+  it.each(scenarios)("%s -> validate, task, audit, 200", async (_n, o, over, reason, outstanding) => {
+    const pfId = over.pf_payment_id ?? "1089250";
+    const { r, calls, raised, audits } = await run(body(over), mk(o));
+    expect(r).toEqual({ status: 200, body: "OK", outcome: "unreconciled" });
+    expect(calls).toContain("validate");
+    expect(noMoney(calls)).toBe(true);
+    expect(raised).toEqual([{ invoiceId: INV, pfPaymentId: pfId, amountCents: 95000, outstandingCents: outstanding, reason }]);
+    expect(audits).toEqual([{ action: "payfast.itn.unreconciled", detail: { reason, invoice_id: INV, pf_payment_id: pfId, amount_cents: 95000, outstanding_cents: outstanding } }]);
+  });
+  it("validate false -> 400 and NO task, no audit of money", async () => {
+    const { r, raised, audits } = await run(body(), mk({ invStatus: "paid", outstanding: 0, async validate() { return false; } }));
+    expect(r).toMatchObject({ status: 400, outcome: "validation_failed" });
+    expect(raised).toEqual([]);
+    expect(audits.map((a) => a.action)).toEqual(["payfast.itn.rejected"]);
+  });
+  it("validate throws -> 500 (PayFast retries) and NO task", async () => {
+    const { r, raised } = await run(body(), mk({ invStatus: "paid", outstanding: 0, async validate() { throw new Error("down"); } }));
+    expect(r).toMatchObject({ status: 500, outcome: "validate_unavailable" });
+    expect(raised).toEqual([]);
+  });
+  it("the task cannot be created -> 500 so PayFast retries (the money must not be dropped)", async () => {
+    const { r, audits } = await run(body(), mk({ invStatus: "paid", outstanding: 0, async raiseUnreconciled() { throw new Error("db"); } }));
+    expect(r).toMatchObject({ status: 500, outcome: "record_failed" });
+    expect(audits.map((a) => a.action)).not.toContain("payfast.itn.unreconciled");
+  });
+  it("a failing audit write does not change the 200", async () => {
+    const { r, raised } = await run(body(), mk({ invStatus: "paid", outstanding: 0, async audit() { throw new Error("x"); } }));
+    expect(r.outcome).toBe("unreconciled");
+    expect(raised).toHaveLength(1);
+  });
+  it("the same unreconciled ITN replayed -> 200, no PayFast call, no second task, no second audit row", async () => {
+    const { r, calls, raised, audits } = await run(body(), mk({ invStatus: "paid", outstanding: 0, raisedBefore: true }));
+    expect(r).toEqual({ status: 200, body: "OK", outcome: "duplicate-unreconciled" });
+    expect(calls).not.toContain("validate");
+    expect(calls).not.toContain("raise");
+    expect(raised).toEqual([]);
+    expect(audits).toEqual([]);
+  });
+  it("an exact match on a payable invoice is still recorded, with no task", async () => {
+    const { r, raised } = await run(body(), mk({ invStatus: "issued", outstanding: 95000 }));
+    expect(r.outcome).toBe("recorded");
+    expect(raised).toEqual([]);
   });
 });
 
 describe("10 recording and database errors", () => {
   const failing = (error: string) => mk({ async recordPayment() { return { ok: false, error }; } });
-  it.each(["overpay", "invoice_not_payable"])("%s -> 200 duplicate-or-closed, audited for reconciliation", async (e) => {
-    const { r, audits } = await run(body(), failing(e));
-    expect(r).toEqual({ status: 200, body: "OK", outcome: "duplicate-or-closed" });
-    expect(audits).toEqual([{ action: "payfast.itn.rejected", detail: { reason: e, invoice_id: INV, pf_payment_id: "1089250" } }]);
+  it.each(["overpay", "invoice_not_payable"])("%s from the DB (state changed after our read) -> 200 unreconciled with a task and audit", async (e) => {
+    const { r, audits, raised } = await run(body(), failing(e));
+    expect(r).toEqual({ status: 200, body: "OK", outcome: "unreconciled" });
+    expect(raised).toEqual([{ invoiceId: INV, pfPaymentId: "1089250", amountCents: 95000, outstandingCents: 95000, reason: e }]);
+    expect(audits).toEqual([{ action: "payfast.itn.unreconciled", detail: { reason: e, invoice_id: INV, pf_payment_id: "1089250", amount_cents: 95000, outstanding_cents: 95000 } }]);
   });
   it("ref_conflict from the DB (race on another invoice) -> 400", async () => {
     expect((await run(body(), failing("ref_conflict"))).r).toMatchObject({ status: 400, outcome: "ref_conflict" });
   });
   it.each(["unknown_invoice", "forbidden", "invalid_amount", "ref_required", "connection reset", ""])("other DB error %j -> 500 (PayFast retries)", async (e) => {
-    expect((await run(body(), failing(e))).r).toMatchObject({ status: 500, outcome: "record_failed" });
+    const { r, raised } = await run(body(), failing(e));
+    expect(r).toMatchObject({ status: 500, outcome: "record_failed" });
+    expect(raised).toEqual([]);
   });
   it("a thrown error from recordPayment -> 500", async () => {
     expect((await run(body(), mk({ async recordPayment() { throw new Error("socket"); } }))).r).toMatchObject({ status: 500 });
@@ -263,23 +361,23 @@ describe("10 recording and database errors", () => {
   it("lookup failures -> 500", async () => {
     expect((await run(body(), mk({ async loadInvoice() { throw new Error("db"); } }))).r.status).toBe(500);
     expect((await run(body(), mk({ async loadPaymentByRef() { throw new Error("db"); } }))).r.status).toBe(500);
+    expect((await run(body(), mk({ async unreconciledExists() { throw new Error("db"); } }))).r.status).toBe(500);
   });
 });
 
 describe("audit", () => {
   it("a failing audit write never changes the answer", async () => {
     const d = mk({ async audit() { throw new Error("audit down"); } });
-    expect((await run(body({ amount_gross: "1.00" }), d)).r).toMatchObject({ status: 400, outcome: "amount_mismatch" });
+    expect((await run(body({ merchant_id: "999" }), d)).r).toMatchObject({ status: 400, outcome: "bad_merchant" });
   });
-  it("audit entries carry reason codes (and the validated invoice id / gateway ref), never the raw body, card data or amounts", async () => {
-    const { audits } = await run(body({ amount_gross: "1.00", name_first: "SECRETNAME" }));
-    expect(JSON.stringify(audits)).not.toMatch(/SECRETNAME|zoe@example|signature|amount_gross|"1\.00|s3cret/);
-    expect(audits[0].action).toBe("payfast.itn.rejected");
-    expect(Object.keys(audits[0].detail).sort()).toEqual(["invoice_id", "pf_payment_id", "reason"]);
+  it("rejection audit entries carry reason codes (and the validated invoice id / gateway ref), never the raw body, card data or amounts", async () => {
+    const { audits } = await run(body({ name_first: "SECRETNAME" }), mk({ async validate() { return false; } }));
+    expect(JSON.stringify(audits)).not.toMatch(/SECRETNAME|zoe@example|signature|amount|s3cret/);
+    expect(audits).toEqual([{ action: "payfast.itn.rejected", detail: { reason: "validation_failed", invoice_id: INV, pf_payment_id: "1089250" } }]);
   });
-  it("rejections before the signature is proven carry no attacker-supplied data at all", async () => {
-    const { audits } = await run(body({ m_payment_id: "EVIL" }, { sig: "0".repeat(32) }));
-    expect(audits).toEqual([{ action: "payfast.itn.rejected", detail: { reason: "bad_signature" } }]);
+  it("the unreconciled audit entry carries ids and amounts but never the body or personal data", async () => {
+    const { audits } = await run(body({ name_first: "SECRETNAME" }), mk({ invStatus: "paid", outstanding: 0 }));
+    expect(JSON.stringify(audits)).not.toMatch(/SECRETNAME|zoe@example|signature|s3cret/);
   });
   it("never writes the raw body to the console", async () => {
     const seen: string[] = [];

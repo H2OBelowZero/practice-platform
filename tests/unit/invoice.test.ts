@@ -13,6 +13,10 @@ describe("computeInvoice", () => {
   it("no VAT when not registered", () => {
     expect(one(95000, { vatRegistered: false })).toEqual({ subtotal: 95000, discount: 0, vat: 0, total: 95000 });
   });
+  it("rates 0 and 100 are the accepted bounds", () => {
+    expect(one(1000, { vatRate: 100 })).toMatchObject({ vat: 1000, total: 2000 });
+    expect(one(1000, { vatRate: 0 }).vat).toBe(0);
+  });
   it("zero VAT rate", () => expect(one(95000, { vatRate: 0 })).toMatchObject({ vat: 0, total: 95000 }));
   it("sums several lines", () => {
     expect(computeInvoice({ lines: [{ quantity: 3, unitCents: 1000 }, { quantity: 1, unitCents: 250 }], discountCents: 0, vatRegistered: false, vatRate: 15 }).subtotal).toBe(3250);
@@ -81,6 +85,8 @@ describe("computeInvoice", () => {
       ["NaN rate", { ...ok, vatRate: NaN }],
       ["Infinite rate", { ...ok, vatRate: Infinity }],
       ["rate with 3 decimals", { ...ok, vatRate: 15.005 }],
+      ["rate above 100", { ...ok, vatRate: 100.01 }],
+      ["rate 1500 (typo for 15)", { ...ok, vatRate: 1500 }],
     ];
     it.each(cases)("%s", (_n, o) => expect(() => computeInvoice(o)).toThrow("invalid_amount"));
   });

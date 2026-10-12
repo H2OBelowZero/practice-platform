@@ -91,7 +91,7 @@ Environment variables (`.env.example`):
 | Variable | Notes |
 | --- | --- |
 | `PAYFAST_MERCHANT_ID`, `PAYFAST_MERCHANT_KEY` | From the PayFast dashboard (Settings > Integration). Building a checkout throws if either is missing; the ITN returns 500 if the merchant id is missing. |
-| `PAYFAST_PASSPHRASE` | **Must be set identically in the PayFast dashboard** (Settings > Integration > Security passphrase). A mismatch makes every signature fail. Always set one in production. |
+| `PAYFAST_PASSPHRASE` | **REQUIRED in production** and must equal the passphrase in the PayFast dashboard (Settings > Integration > Security passphrase); a mismatch makes every signature fail. Without it the signature is an unkeyed MD5 anyone can compute, so outside the sandbox the ITN answers 500 `misconfigured` and the checkout refuses to build. Only `PAYFAST_SANDBOX=true` may run without one. |
 | `PAYFAST_SANDBOX` | Exactly `true` selects `sandbox.payfast.co.za`; anything else (including unset) is the **live** host `www.payfast.co.za`. |
 | `APP_URL` | Public origin; the notify URL is `${APP_URL}/api/payfast/itn`. |
 | `SUPABASE_SERVICE_ROLE_KEY` | The ITN runs as the service role (`record_payment` accepts the `payfast` method only from a `service_role` JWT). |
@@ -100,10 +100,27 @@ What the ITN does, in order (R36): body <= 10 KB -> MD5 signature (constant-time
 received order) -> source IP in a PayFast range -> `merchant_id` -> `m_payment_id` is an invoice UUID that exists -> replay
 (`PF-<pf_payment_id>` already recorded for this invoice and amount: answer 200 without calling PayFast) -> `payment_status`
 COMPLETE only -> `amount_gross` equals the invoice's outstanding balance (to the cent, parsed from the string) -> PayFast
-server-side `/eng/query/validate` -> `record_payment`. Rejections are written to the audit log (`payfast.itn.rejected`, reason
-code only, never the body). HTTP 200 means "stop retrying" (recorded, duplicate, ignored status, or invoice already closed),
+server-side `/eng/query/validate` -> `record_payment`. Rejections of a request whose signature verified are written to the audit log
+(`payfast.itn.rejected`, reason code only, never the body); rejections before that point (oversize, unparseable, bad signature) are
+anonymous, write no audit row (log flooding) and only log a fixed reason code to the server console. HTTP 200 means "stop retrying" (recorded, duplicate, ignored status, or invoice already closed),
 400 means refused, 500 means PayFast should retry (PayFast unreachable, database error). The checkout always bills the whole
 outstanding balance; part payments come from manual and medical-aid recording.
+
+### Payments that no longer fit the invoice (reconciliation)
+
+A genuine payment can arrive for an invoice that no longer takes it: paid twice, voided, a credit note or a medical-aid remittance
+reduced the balance between checkout and notification. The money is real, so the ITN does not refuse it. After PayFast's own validate
+says `VALID` it answers 200, writes an audit row `payfast.itn.unreconciled` (reason `amount_mismatch` / `invoice_not_payable` /
+`overpay`, invoice id, `pf_payment_id`, amount and outstanding in cents) and raises ONE staff task, **"PayFast payment needs
+reconciliation"** (high priority, linked to the patient, source `payfast_unreconciled:<pf_payment_id>`; visible to psychologist and
+admin, no clinical data; the invoice id, reason and amounts are in the task's `meta`). A PayFast retry of the same notification
+is a no-op. If validate is not `VALID` the ITN answers 400 and no task is created; if PayFast cannot be reached it answers 500 and
+PayFast retries.
+
+To reconcile: open the task, find the payment in the PayFast dashboard by `pf_payment_id` (or by the invoice id, which is the
+`m_payment_id`), then either **refund the payment from the PayFast dashboard** or, when the money should be kept, record an
+adjustment against the right invoice (manual payment or credit note), and mark the task done. **PayFast refunds are manual in
+Phase 1**: nothing in the app calls PayFast to refund.
 
 Go-live checklist:
 
@@ -111,7 +128,8 @@ Go-live checklist:
   must not redirect, sit behind authentication or be blocked by a firewall.
 - **Confirm the source IP ranges** against PayFast's current documentation: `PAYFAST_IP_RANGES` in `lib/payments/payfast.ts`
   (197.97.145.144/28, 41.74.179.192/27, 102.216.36.0/28, 102.216.36.128/28, 144.126.193.139/32). They are enforced for sandbox
-  ITNs too. The route reads the client address from `x-vercel-forwarded-for` / the first `x-forwarded-for` entry, which Vercel
+  ITNs too. **Put no other proxy (e.g. Cloudflare) in front of Vercel**: the client address would become the proxy's and genuine
+  PayFast notifications would be rejected as `bad_ip`. The route reads the client address from `x-vercel-forwarded-for` / the first `x-forwarded-for` entry, which Vercel
   overwrites; on any other host those headers are caller-controlled, so the IP check is then only advisory (signature, merchant id
   and PayFast's own validate still apply).
 - Confirm the checkout field order and the signature rules in PayFast's documentation (`CHECKOUT_FIELD_ORDER`). The ITN signature

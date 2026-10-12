@@ -22,7 +22,7 @@ export function computeInvoice(o: {
     if (subtotal > MAX_CENTS) throw bad();
   }
   const rateBp = Math.round(o.vatRate * 100);
-  if (!Number.isFinite(o.vatRate) || o.vatRate < 0 || Math.abs(o.vatRate * 100 - rateBp) > 1e-6) throw bad(); // at most 2 decimals
+  if (!Number.isFinite(o.vatRate) || o.vatRate < 0 || o.vatRate > 100 || Math.abs(o.vatRate * 100 - rateBp) > 1e-6) throw bad(); // at most 2 decimals; a rate outside 0-100 is a typo
   const discount = Math.min(o.discountCents, subtotal);
   const taxable = subtotal - discount;
   const vat = o.vatRegistered ? Math.floor((taxable * rateBp + 5000) / 10000) : 0; // half-up

@@ -1,3 +1,4 @@
+import "server-only";
 import { createHash } from "crypto";
 import { appUrl } from "@/lib/app-url";
 
@@ -55,6 +56,10 @@ export const centsToDecimal = (cents: number) => {
 /** The form the portal posts to PayFast. Whole outstanding balance only (the ITN requires amount == outstanding). */
 export function buildCheckout(o: { invoiceId: string; number: string; amountCents: number; name: string; email: string }): { action: string; fields: Record<string, string> } {
   const base = appUrl();
+  const passphrase = process.env.PAYFAST_PASSPHRASE?.trim();
+  if (!passphrase && process.env.PAYFAST_SANDBOX !== "true") {
+    throw new Error("PAYFAST_PASSPHRASE must be set (it must equal the passphrase in the PayFast dashboard); only the sandbox may run without one");
+  }
   const raw: Record<(typeof CHECKOUT_FIELD_ORDER)[number], string> = {
     merchant_id: required("PAYFAST_MERCHANT_ID"), merchant_key: required("PAYFAST_MERCHANT_KEY"),
     // return_url only shows the stored status: the page never trusts the query string, only the ITN records money
@@ -66,7 +71,7 @@ export function buildCheckout(o: { invoiceId: string; number: string; amountCent
   };
   const fields: Record<string, string> = {};
   for (const k of CHECKOUT_FIELD_ORDER) if (raw[k] !== "") fields[k] = raw[k]; // empty values are neither posted nor signed
-  fields.signature = payfastSignature(fields, process.env.PAYFAST_PASSPHRASE);
+  fields.signature = payfastSignature(fields, passphrase);
   return { action: `https://${host()}/eng/process`, fields };
 }
 
