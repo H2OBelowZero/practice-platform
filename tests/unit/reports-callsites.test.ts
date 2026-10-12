@@ -123,15 +123,29 @@ describe("tripwires on the reports code", () => {
 });
 
 describe("report_compliance only counts audit actions that something writes", () => {
-  // Task 16c's settings audit triggers will write settings.* / practice.* actions; until then those two families legitimately count zero.
-  const NOT_WRITTEN_YET = ["settings.%", "practice.%"];
-  const body = sql.slice(sql.indexOf("create function report_compliance("), sql.indexOf("create function report_transactions("));
+  // Task 16c's settings audit trigger (0027) writes settings.change / settings.payment_instructions, so settings.% is counted like every other family. Nothing writes
+  // a practice.* action (the practice row is audited under settings.%), so that family still legitimately counts zero.
+  const NOT_WRITTEN_YET = ["practice.%"];
+  // the live definition is 0028's (it leaves out the second row of a payment-instruction change); neither file counts as a WRITER of the actions it counts
+  const complianceSql = read("supabase", "migrations", "0028_compliance_settings.sql");
+  const body = complianceSql.slice(complianceSql.indexOf("create or replace function report_compliance("));
   const counted = [...new Set([...body.matchAll(/l\.action (?:= |like )'([a-z_.%]+)'/g)].map((m) => m[1]))];
   const writers = [
-    ...readdirSync(join(root, "supabase", "migrations")).filter((f) => f !== "0025_reports.sql" && f.endsWith(".sql")).map((f) => read("supabase", "migrations", f)),
+    ...readdirSync(join(root, "supabase", "migrations")).filter((f) => f !== "0025_reports.sql" && f !== "0028_compliance_settings.sql" && f.endsWith(".sql")).map((f) => read("supabase", "migrations", f)),
     ...["app", "lib"].flatMap((d) => files(join(root, d))).map((f) => strip(readFileSync(f, "utf8"))),
   ].join("\n");
 
+  it("0028 is the 0025 function with exactly one more condition: the payment-instruction second row is not counted", () => {
+    const old = sql.slice(sql.indexOf("create function report_compliance("), sql.indexOf("create function report_transactions("));
+    const norm = (t: string) => t.replace(/--[^\n]*/g, "").replace(/create or replace function/, "create function").replace(/\s+/g, " ").trim();
+    const cut = (t: string) => t.slice(0, t.indexOf("end $$;") + 7);
+    expect(norm(cut(body)).replace(" and l.action <> 'settings.payment_instructions'", "")).toBe(norm(cut(old)));
+    expect(body).toContain("and l.action <> 'settings.payment_instructions'");
+  });
+  it("settings.% really has writers now: the trigger in 0027 writes 'settings.change' and 'settings.payment_instructions'", () => {
+    expect(writers).toContain("'settings.change'");
+    expect(writers).toContain("'settings.payment_instructions'");
+  });
   it("lists the actions the SQL counts (so a new one is a deliberate change)", () => {
     expect(counted.sort()).toEqual(["auth.login", "claim.view", "consent.grant", "consent.withdraw", "export.%", "note.addendum", "note.view", "patient.view", "payfast.itn.rejected", "practice.%", "settings.%"]);
   });
@@ -143,8 +157,8 @@ describe("report_compliance only counts audit actions that something writes", ()
     });
     expect(missing).toEqual([]);
   });
-  it("the allow-listed families have NO writer yet: when Task 16c adds one this fails, and the allow-list entry must then be removed so the first test covers it", () => {
-    expect(NOT_WRITTEN_YET).toEqual(["settings.%", "practice.%"]);
+  it("the allow-listed families have NO writer yet: when something adds one this fails, and the allow-list entry must then be removed so the first test covers it", () => {
+    expect(NOT_WRITTEN_YET).toEqual(["practice.%"]);
     expect(counted).toEqual(expect.arrayContaining(NOT_WRITTEN_YET));
     for (const family of NOT_WRITTEN_YET) {
       const prefix = family.slice(0, -1).replace(".", "\\.");

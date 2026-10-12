@@ -277,3 +277,37 @@ describe("working hours", () => {
     });
   });
 });
+
+describe("deactivating a session type (the settings page never deletes one)", () => {
+  it("an inactive type cannot be booked, an appointment already made keeps it, and switching it back on works again", async () => {
+    await withClient(async (c) => {
+      const { psy, p1 } = await seed(c);
+      const t = (await c.query("insert into session_types(name,duration_min,fee_cents,buffer_min) values ('Therapy',50,95000,0) returning id")).rows[0].id as string;
+      await c.query("insert into availability_rules(weekday,start_time,end_time) values (1,'08:00','17:00')"); // Mondays 08-17 SAST
+      const book = (at: string) => c.query("select book_appointment($1,$2,$3,'confirmed') id", [p1, t, at]);
+      const first = (await book("2031-03-17T06:00:00Z")).rows[0].id as string;
+      await as(c, psy, "update session_types set active=false where id=$1", [t]);
+      await expect(book("2031-03-17T08:00:00Z")).rejects.toThrow(/unknown_session_type/);
+      expect((await c.query("select session_type_id from appointments where id=$1", [first])).rows[0].session_type_id).toBe(t);
+      await as(c, psy, "update session_types set active=true where id=$1", [t]);
+      await book("2031-03-17T08:00:00Z");
+      // and a type that appointments refer to cannot be deleted at all
+      await expect(as(c, psy, "delete from session_types where id=$1", [t])).rejects.toThrow(/foreign key|violates/);
+    });
+  });
+});
+
+describe("compliance report (0028)", () => {
+  it("counts a payment-instruction change once, not twice, and counts the other settings changes", async () => {
+    await withClient(async (c) => {
+      const { psy } = await fresh(c);
+      await as(c, psy, "update practices set payment_instructions='New bank details'");
+      const n = async () => Number((await as(c, psy, "select n from report_compliance(sa_today()-1, sa_today()+1) where section='activity' and label='settings_changes'")).rows[0].n);
+      expect(await n()).toBe(1);
+      expect((await audit(c)).length).toBe(2); // both rows exist in the log
+      await as(c, psy, "update practices set vat_rate=14");
+      await as(c, psy, "insert into session_types(name,duration_min,fee_cents) values ('x',50,1)");
+      expect(await n()).toBe(3);
+    });
+  });
+});
