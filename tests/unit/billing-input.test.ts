@@ -169,3 +169,10 @@ describe("parseCreditNoteForm", () => {
     expect(err(parseCreditNoteForm({ amount: "5", reason: "" }, "split"))).toMatch(/reason/);
   });
 });
+
+
+it("default due date is 14 days on, crossing month and year ends", () => {
+  expect(defaultDueDate("2030-02-01")).toBe("2030-02-15");
+  expect(defaultDueDate("2030-12-25")).toBe("2031-01-08");
+  expect(defaultDueDate("2032-02-20")).toBe("2032-03-05"); // leap year
+});
