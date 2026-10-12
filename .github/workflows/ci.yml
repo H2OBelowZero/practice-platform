@@ -29,7 +29,6 @@ jobs:
           PAYFAST_MERCHANT_KEY: 46f0cd694581a
           PAYFAST_PASSPHRASE: x
           PAYFAST_SANDBOX: "true"
-      # Advisory only: a new advisory in a transitive dependency must not block unrelated work. Review the log; see README "Dependencies".
-      - name: npm audit (runtime dependencies, high and above)
-        run: npm audit --omit=dev --audit-level=high
-        continue-on-error: true
+      # Fails only on NEW high/critical advisories in runtime dependencies (not in .github/audit-allowlist.json); moderate ones are printed. See README "Dependencies".
+      - name: npm audit (runtime dependencies, new high/critical only)
+        run: node scripts/audit-check.mjs

@@ -1,0 +1,6 @@
+[
+  { "id": "GHSA-qx2v-qp2m-jg93", "package": "postcss", "reason": "Vendored in next@15.5.27 (postcss 8.4.31). Build time only: PostCSS processes our own stylesheet and does not run while serving requests. Fixed only in Next 16.", "reviewed": "2026-10-12" },
+  { "id": "GHSA-6g55-p6wh-862q", "package": "postcss", "reason": "Same vendored postcss; needs attacker-controlled CSS / sourceMappingURL at build time. Fixed only in Next 16.", "reviewed": "2026-10-12" },
+  { "id": "GHSA-fxqj-rqcc-2cmp", "package": "postcss", "reason": "Same vendored postcss; incomplete fix of GHSA-6g55-p6wh-862q. Fixed only in Next 16.", "reviewed": "2026-10-12" },
+  { "id": "GHSA-r28c-9q8g-f849", "package": "postcss", "reason": "Same vendored postcss; previous source map auto-loading at build time. Fixed only in Next 16.", "reviewed": "2026-10-12" }
+]
