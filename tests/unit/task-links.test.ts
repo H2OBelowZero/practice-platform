@@ -12,10 +12,17 @@ describe("taskLink", () => {
     expect(taskLink({ id: T, source: "payfast_unreconciled:777", meta: {}, patient_id: P })?.href).toBe(`/app/patients/${P}?tab=billing`);
     expect(taskLink({ id: T, source: "payfast_unreconciled:777", meta: { invoice_id: "../x" } })).toBeNull();
   });
-  it("consent_withdrawn, claim_rejected and duplicate_patient lead to the patient", () => {
+  it("consent_withdrawn and duplicate_patient lead to the patient", () => {
     expect(taskLink({ id: T, source: "consent_withdrawn", patient_id: P })?.href).toBe(`/app/patients/${P}?tab=forms`);
-    expect(taskLink({ id: T, source: "claim_rejected", patient_id: P })?.href).toBe(`/app/patients/${P}?tab=billing`);
     expect(taskLink({ id: T, source: "duplicate_patient", patient_id: P })?.href).toBe(`/app/patients/${P}`);
+  });
+  it("claim_rejected opens the claim named in meta (0019), else the patient's billing tab (tasks made before 0019)", () => {
+    const C = "c1c1c1c1-d2d2-4e3e-8f4f-a5a5a5a5a5a5";
+    expect(taskLink({ id: T, source: "claim_rejected", patient_id: P, meta: { claim_id: C } })).toEqual({ href: `/app/claims/${C}`, label: "Open claim" });
+    expect(taskLink({ id: T, source: "claim_rejected", patient_id: P, meta: null })).toEqual({ href: `/app/patients/${P}?tab=billing`, label: "Open billing" });
+    expect(taskLink({ id: T, source: "claim_rejected", patient_id: P })?.href).toBe(`/app/patients/${P}?tab=billing`);
+    expect(taskLink({ id: T, source: "claim_rejected", patient_id: P, meta: { claim_id: "../../x" } })?.href).toBe(`/app/patients/${P}?tab=billing`);
+    expect(taskLink({ id: T, source: "claim_rejected", patient_id: null, meta: { claim_id: "x" } })).toBeNull();
   });
   it("risk_flag opens the note", () => {
     expect(taskLink({ id: T, source: `risk_flag:${N}`, patient_id: P })).toEqual({ href: `/app/notes/${N}`, label: "Open note" });

@@ -19,7 +19,11 @@ export function taskLink(t: TaskLinkInput): TaskLink | null {
     return ok(inv) ? { href: `/app/billing/${inv}`, label: "Open invoice" } : patient("billing");
   }
   if (src === "consent_withdrawn") return patient("forms") && { href: patient("forms")!.href, label: "Open consents" };
-  if (src === "claim_rejected") return patient("billing") && { href: patient("billing")!.href, label: "Open billing" }; // Task 14 may point this at the claim
+  if (src === "claim_rejected") {
+    // 0019 puts the claim id in meta; tasks made before it have none, so they lead to the patient's billing tab
+    const claim = t.meta && typeof t.meta === "object" ? (t.meta as { claim_id?: unknown }).claim_id : undefined;
+    return ok(claim) ? { href: `/app/claims/${claim}`, label: "Open claim" } : patient("billing") && { href: patient("billing")!.href, label: "Open billing" };
+  }
   if (src === "duplicate_patient") return patient();
   if (src.startsWith("risk_flag:")) { const note = src.slice("risk_flag:".length); return ok(note) ? { href: `/app/notes/${note}`, label: "Open note" } : patient("notes"); }
   return null;
