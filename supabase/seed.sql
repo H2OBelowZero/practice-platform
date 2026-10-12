@@ -107,6 +107,7 @@ on conflict (key, version) do nothing;
 
 insert into form_templates(key, version, schema) values ('medical_history', 1, $tpl${
   "title": "Health history",
+  "restricted": true,
   "intro": "This helps your psychologist understand your overall health. Your answers are health information, which the law treats as special personal information, and they are kept confidential as described in our privacy notice.\n\nIf you are in crisis, call SADAG on 0800 567 567 or go to the nearest emergency room. This form is not monitored in real time.",
   "fields": [
     {

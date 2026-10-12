@@ -166,7 +166,7 @@ describe("list helpers", () => {
 });
 
 describe("audit and notices", () => {
-  it("describes patient actions and shows unknown codes as they are", () => { expect(auditActionText("patient.update")).toBe("Changed details"); expect(auditActionText("form.submit")).toBe("form.submit"); expect(auditActionText("constructor")).toBe("constructor"); });
+  it("describes patient actions and shows unknown codes as they are", () => { expect(auditActionText("patient.update")).toBe("Changed details"); expect(auditActionText("form.submit")).toBe("Form submitted"); expect(auditActionText("form.unknown")).toBe("form.unknown"); expect(auditActionText("constructor")).toBe("constructor"); });
   it("summarises detail without nested values", () => {
     expect(auditDetailText({ fields: ["email", "phone"] })).toBe("fields: email, phone");
     expect(auditDetailText({ from: "active", n: 2, nested: { a: 1 } })).toBe("from: active; n: 2");

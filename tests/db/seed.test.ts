@@ -17,3 +17,9 @@ it("seed.sql loads, is safe to run twice, and stores nine valid version 1 templa
     expect(checkSchema(r.schema), r.key).toEqual([]);
   }
 }));
+
+it("only the health history is restricted (admin cannot read its submissions)", () => withClient(async (c) => {
+  await c.query(seedSql);
+  const { rows } = await c.query("select key from form_templates where schema ->> 'restricted' = 'true'");
+  expect(rows.map((r) => r.key)).toEqual(["medical_history"]);
+}));

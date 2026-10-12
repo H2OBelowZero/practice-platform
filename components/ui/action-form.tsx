@@ -6,7 +6,7 @@ import { FormError } from "./form-error";
 import { SubmitButton } from "./submit-button";
 import type { ButtonVariant } from "./button";
 
-type Common = { submitLabel: string; pendingLabel?: string; variant?: ButtonVariant; className?: string };
+type Common = { submitLabel: React.ReactNode; pendingLabel?: string; variant?: ButtonVariant; className?: string };
 
 /**
  * A form that calls a server action. `args` are the leading arguments (for example the appointment id), the form's fields

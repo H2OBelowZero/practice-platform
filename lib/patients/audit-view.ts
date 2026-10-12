@@ -6,6 +6,12 @@ const ACTION_TEXT: Record<string, string> = {
   "patient.archive": "Archived the patient",
   "patient.restore": "Restored the patient",
   "patient.invite": "Invited to the portal",
+  "form.request": "Requested a form",
+  "form.view": "Opened a submitted form",
+  "form.submit": "Form submitted",
+  "form.return": "Returned a form for correction",
+  "consent.grant": "Consent given",
+  "consent.withdraw": "Consent withdrawn",
 };
 export const auditActionText = (action: string): string => (Object.hasOwn(ACTION_TEXT, action) ? ACTION_TEXT[action] : action);
 

@@ -7,14 +7,18 @@ import type { TabContext } from "./tabs";
 
 type Row = { id: number; actor_id: string | null; role: string | null; action: string; detail: unknown; at: string };
 
-/** Everything the audit log holds about this patient (rows whose entity id is the patient), newest first. Psychologist only (also RLS). */
+/** Everything the audit log holds about this patient (rows whose entity id is the patient or one of their form submissions), newest first. Psychologist only (also RLS). */
 export async function AuditTab({ patient, sb, query }: TabContext) {
   const page = parsePage(query.apage);
   const { from, to } = pageRange(page);
   const href = (p: number) => hrefWith(`/app/patients/${patient.id}`, { tab: "audit", apage: p > 1 ? p : undefined });
 
+  // form events (request, view, submit, return) are recorded against the submission, everything else against the patient
+  const { data: subs } = await sb.from("form_submissions").select("id").eq("patient_id", patient.id);
+  const ids = [patient.id, ...(subs ?? []).map((s) => s.id as string)];
+
   const res = await sb.from("audit_log").select("id, actor_id, role, action, detail, at", { count: "exact" })
-    .eq("entity_id", patient.id).order("id", { ascending: false }).range(from, to);
+    .in("entity_id", ids).order("id", { ascending: false }).range(from, to);
   if (res.error) return <Notice tone="error">We could not load the audit log. Please refresh the page.</Notice>;
   const rows = (res.data ?? []) as Row[];
   const total = res.count ?? rows.length;

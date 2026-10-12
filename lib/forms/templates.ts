@@ -40,6 +40,7 @@ const registration: FormSchema = {
 
 const medicalHistory: FormSchema = {
   title: "Health history",
+  restricted: true, // clinical history: psychologist only (the admin cannot read these submissions, see 0012_form_submit.sql)
   intro:
     "This helps your psychologist understand your overall health. Your answers are health information, which the law treats as special personal information, and they are kept confidential as described in our privacy notice.\n\n" +
     CRISIS,

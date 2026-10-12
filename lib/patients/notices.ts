@@ -7,6 +7,8 @@ export const NOTICE_TEXT = {
   archived: "The patient has been archived. Their record is kept.",
   restored: "The patient has been restored.",
   invited: "The invitation has been queued. The patient will get an email with a link to register.",
+  form_requested: "The form has been requested. It now shows in the patient's Documents.",
+  form_returned: "The form has been returned to the patient with your note.",
 } as const;
 export type PatientNoticeCode = keyof typeof NOTICE_TEXT;
 export const patientNotice = (code: string | undefined): string | undefined => (code !== undefined && Object.hasOwn(NOTICE_TEXT, code) ? NOTICE_TEXT[code as PatientNoticeCode] : undefined);

@@ -9,8 +9,11 @@ export const FIELD_TYPES: readonly FieldType[] = ["text", "textarea", "date", "s
 
 /** `help` is optional small print under the label; `consentPurpose` (checkbox only) records a consent per purpose when the form is submitted. */
 export type FormField = { key: string; label: string; type: FieldType; required?: boolean; options?: string[]; consentPurpose?: string; help?: string };
-/** `title` and `intro` (paragraphs separated by a blank line) are shown above the fields. */
-export type FormSchema = { title?: string; intro?: string; fields: FormField[] };
+/**
+ * `title` and `intro` (paragraphs separated by a blank line) are shown above the fields.
+ * `restricted: true` marks clinical history: the admin cannot read submissions of such a template (enforced by RLS, migration 0012).
+ */
+export type FormSchema = { title?: string; intro?: string; restricted?: boolean; fields: FormField[] };
 
 export const MAX_LEN = { text: 2000, textarea: 10000 } as const;
 
@@ -70,6 +73,8 @@ export function checkSchema(schema: unknown): string[] {
   const problems: string[] = [];
   const s = schema as { fields?: unknown } | null;
   if (!s || typeof s !== "object" || !Array.isArray(s.fields) || s.fields.length === 0) return ["schema needs a non-empty fields array"];
+  const restricted = (s as { restricted?: unknown }).restricted;
+  if (restricted !== undefined && typeof restricted !== "boolean") problems.push("restricted must be true or false");
   const seen = new Set<string>();
   for (const [i, raw] of s.fields.entries()) {
     const f = raw as Partial<FormField> | null;

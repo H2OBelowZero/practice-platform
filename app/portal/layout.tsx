@@ -28,7 +28,10 @@ export default async function PortalLayout({ children }: { children: React.React
       </header>
       <div className="has-bottom-nav flex-1">
         <main id="main" tabIndex={-1} className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-8 lg:py-12">{children}</main>
-        <footer className="mx-auto w-full max-w-4xl px-4 pb-8 sm:px-8"><EmergencyNotice text={crisis} /></footer>
+        <footer className="mx-auto w-full max-w-4xl px-4 pb-8 sm:px-8">
+          <EmergencyNotice text={crisis} />
+          <p className="mt-4 text-sm"><Link href="/portal/privacy">Privacy and consent</Link></p>
+        </footer>
       </div>
       <div className="on-dark fixed inset-x-0 bottom-0 z-40 border-t border-sage-800 bg-sage-900 pb-[env(safe-area-inset-bottom)] lg:hidden">
         <NavLinks items={items} variant="bottom" label="Main (phone)" />
