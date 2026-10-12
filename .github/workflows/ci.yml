@@ -17,3 +17,19 @@ jobs:
       - run: npm run lint
       - run: npm run test:unit
       - run: npm run test:db
+      - name: Build (dummy environment, nothing real)
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://localhost:54321
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy
+          SUPABASE_SERVICE_ROLE_KEY: dummy
+          APP_URL: http://localhost:3000
+          CRON_SECRET: ci-only-not-a-secret
+          PAYFAST_MERCHANT_ID: "10000100"
+          PAYFAST_MERCHANT_KEY: 46f0cd694581a
+          PAYFAST_PASSPHRASE: x
+          PAYFAST_SANDBOX: "true"
+      # Advisory only: a new advisory in a transitive dependency must not block unrelated work. Review the log; see README "Dependencies".
+      - name: npm audit (runtime dependencies, high and above)
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true

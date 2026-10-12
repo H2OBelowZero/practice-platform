@@ -223,3 +223,29 @@ Not verified without a live setup: a real provider call, the Vercel schedule its
   neutralised by `lib/reports/csv.ts`; sent with `nosniff`). The control is a plain `<a download>` (never a next/link, which would prefetch and run the export; a prefetch/RSC request gets an empty 204). Viewing writes `audit.view` and exporting writes `export.audit`; both fail closed. A 5 000 row export is read with keyset paging in chunks of
   1 000 because the API caps a response.
 - Reports and Settings are hidden in the navigation until Task 16b adds their pages (`ready: false` in `lib/nav.ts`).
+
+## Security hardening (Task 17a)
+
+- **Content-Security-Policy** is built per request in `middleware.ts` from `lib/security/csp.ts` (nonce + `strict-dynamic`; no `unsafe-inline`/`unsafe-eval` for scripts in production, `unsafe-eval` in `next dev` only). Every page therefore renders dynamically (`export const dynamic = "force-dynamic"` in `app/layout.tsx`): a prerendered page cannot carry a per-request nonce. `style-src` keeps `'unsafe-inline'` (Next and React emit inline styles; they cannot run script). `connect-src` allows only the Supabase project in `NEXT_PUBLIC_SUPABASE_URL` (the browser does not call Supabase today; server actions do the talking). The middleware matcher still skips `/api/payfast`, `/api/cron`, `_next/static` and image files, which carry no CSP.
+- **PayFast and `form-action`**: checkout is a real `<form method="post">` to `https://www.payfast.co.za` (sandbox: `sandbox.payfast.co.za`). Chrome also applies `form-action` to redirects after the POST, so both PayFast hosts are listed. If PayFast ever redirects through another host the browser blocks it with a console message "violates form-action". Not verified until the first sandbox payment on staging.
+- **Static headers** (`next.config.ts` via `lib/security/headers.ts`, all routes): HSTS (2 years, includeSubDomains, no preload), nosniff, `Referrer-Policy: same-origin`, a Permissions-Policy that turns off camera, microphone, geolocation and payment (telehealth in Phase 2 will need to relax this for the video page), `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin`. `Cache-Control: no-store, max-age=0` plus `Pragma: no-cache` on everything signed-in or token-bearing: `/app`, `/portal`, `/api`, `/login`, `/mfa`, `/recover`, `/auth`, `/book/confirmed` (R35). A unit test fails if a new top-level route folder is not listed or deliberately public.
+- **TRUNCATE (R20)**: migration `0029_truncate_hardening.sql` revokes TRUNCATE, TRIGGER and REFERENCES (and MAINTAIN on PostgreSQL 17+) from `anon`, `authenticated` and `service_role` on every public table and in the schema's default privileges. `tests/db/truncate-hardening.test.ts` finds tables from `pg_class`, so a table added later is checked automatically. **After applying migrations to the hosted project run once** (the default-privilege part depends on how Supabase set up the `postgres` role, which the local test database only mimics) and expect zero rows:
+
+  ```sql
+  select c.relname, r.rolname, p.priv
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+  cross join (values ('anon'), ('authenticated'), ('service_role')) r(rolname)
+  cross join (values ('TRUNCATE'), ('TRIGGER'), ('REFERENCES')) p(priv)
+  where n.nspname = 'public' and c.relkind in ('r', 'p') and has_table_privilege(r.rolname, c.oid, p.priv);
+  ```
+- **Authorisation tripwire**: `tests/unit/authz-coverage.test.ts` fails, naming the file, when a page, route handler or server action neither calls `requireRole`/`requireUser`/`requireRecoverySession` before reading data nor sits in its allow-list with a reason (public pages, PayFast ITN, cron, auth callback, sign-in/MFA/recovery actions). It is a text-level check: it does not look inside helpers imported from other modules and does not judge whether the allowed roles are right.
+- **Error pages**: `app/error.tsx`, `app/global-error.tsx` and `app/not-found.tsx` never show an error message or stack; the digest is offered only as a "reference" the practice can look up in the server logs. `robots.txt` keeps crawlers out of the signed-in areas and those layouts are also `noindex`. `manifest.webmanifest` and an SVG icon exist; there is no service worker and no PNG/apple-touch icon yet.
+
+## Dependencies
+
+CI runs `npm audit --omit=dev --audit-level=high` as an advisory step (it does not fail the build) and Dependabot opens weekly npm and GitHub Actions PRs. Known open advisories on 2026-10-12 (no non-breaking fix exists; `npm audit fix` changes nothing, the only offered fix is a major upgrade):
+
+- `postcss` < 8.5.23 inside `next@15.5.27` (vendored as 8.4.31; moderate on `next`, high on `postcss`). Build time only: PostCSS processes our own stylesheet and never runs while serving requests; the advisories need attacker-controlled CSS or source maps. Fixed upstream only in Next 16.
+- `braces` / `micromatch` / `fast-glob` / `@next/eslint-plugin-next` via `eslint-config-next` (high). Dev-only (lint time on our own files); the advisory is a stack-exhaustion DoS from deeply nested glob patterns.
+
+Revisit when moving to Next 16 (a planned, tested upgrade, not an `audit fix --force`).
