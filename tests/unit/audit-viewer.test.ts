@@ -45,6 +45,7 @@ describe("auditDetailParts: whitelist", () => {
         "failed",
         "fields",
         "filters",
+        "from",
         "invoice_id",
         "late",
         "member_id",
@@ -57,6 +58,7 @@ describe("auditDetailParts: whitelist", () => {
         "payment_id",
         "reason",
         "reminders",
+        "report",
         "retried",
         "rows",
         "sent",
@@ -64,10 +66,15 @@ describe("auditDetailParts: whitelist", () => {
         "submission_id",
         "task_id",
         "template",
+        "to",
         "truncated",
         "version",
       ]
     `);
+  });
+  it("shows a report export as the report key, the two dates and the row count, and drops a malformed date", () => {
+    expect(auditDetailParts({ report: "income_by_month", from: "2030-01-01", to: "2030-03-31", rows: 4 })).toEqual(["rows: 4", "report: income_by_month", "from: 2030-01-01", "to: 2030-03-31"]);
+    expect(auditDetailParts({ report: "x y", from: "tomorrow", to: "2030-3-1" })).toEqual([]);
   });
   it("short ids and the SAST time", () => {
     expect(shortEntityId(P)).toBe("9a1b2c3d");

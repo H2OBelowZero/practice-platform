@@ -16,6 +16,7 @@ const ACTION_TEXT: Record<string, string> = {
   "note.addendum": "Added an addendum to a clinical note",
   "consent.grant": "Consent given",
   "consent.withdraw": "Consent withdrawn",
+  "export.report": "Downloaded a report as CSV",
 };
 export const auditActionText = (action: string): string => (Object.hasOwn(ACTION_TEXT, action) ? ACTION_TEXT[action] : action);
 

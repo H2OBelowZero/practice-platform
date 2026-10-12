@@ -45,14 +45,14 @@ it("formats rand", () => {
 
 it("navigation is filtered by role", () => {
   const labels = (r: Parameters<typeof staffNav>[0]) => staffNav(r).map((i) => i.label);
-  expect(labels("bookkeeper")).toEqual(["Billing"]); // Reports arrives in 16b
-  expect(labels("psychologist")).not.toContain("Reports");
+  expect(labels("bookkeeper")).toEqual(["Billing", "Reports"]);
   expect(labels("psychologist")).not.toContain("Settings");
-  expect(labels("psychologist")).toEqual(["Dashboard", "Calendar", "Patients", "Tasks", "Billing", "Claims", "Audit log"]);
-  expect(labels("admin")).toEqual(["Dashboard", "Calendar", "Patients", "Tasks", "Billing", "Claims"]);
+  expect(labels("psychologist")).toEqual(["Dashboard", "Calendar", "Patients", "Tasks", "Billing", "Claims", "Reports", "Audit log"]);
+  expect(labels("admin")).toEqual(["Dashboard", "Calendar", "Patients", "Tasks", "Billing", "Claims", "Reports"]);
   expect(labels("bookkeeper")).not.toContain("Dashboard");
   expect(labels("bookkeeper")).not.toContain("Tasks");
   expect(labels("associate")).toEqual([]);
+  for (const r of ["psychologist", "admin", "bookkeeper"] as const) expect(labels(r)).toContain("Reports");
   expect(labels("psychologist")).toContain("Audit log");
   expect(labels("admin")).not.toContain("Audit log");
   expect(labels("admin")).toContain("Patients");
@@ -60,6 +60,6 @@ it("navigation is filtered by role", () => {
   expect(labels("associate")).not.toContain("Patients"); // those pages 404 for associates in Phase 1
   expect(labels("associate")).not.toContain("Calendar");
   expect(staffPhoneNav("psychologist").map((i) => i.label)).toEqual(["Dashboard", "Calendar", "Patients", "Tasks", "More"]);
-  expect(staffPhoneNav("bookkeeper").map((i) => i.label)).toEqual(["Billing", "More"]);
+  expect(staffPhoneNav("bookkeeper").map((i) => i.label)).toEqual(["Billing", "Reports", "More"]);
   expect(portalNav().map((i) => i.label)).toEqual(["Home", "Appointments", "Documents", "Payments"]);
 });
