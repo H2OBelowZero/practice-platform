@@ -4,6 +4,7 @@ import type { Role } from "@/lib/auth/roles";
 import type { PatientRecord } from "@/lib/patients/record";
 import { AdministrativeTab } from "./tab-administrative";
 import { AuditTab } from "./tab-audit";
+import { BillingTab } from "./tab-billing";
 import { FormsTab } from "./tab-forms";
 import { NotesTab } from "./tab-notes";
 import { ProfileTab } from "./tab-profile";
@@ -23,6 +24,7 @@ export const PATIENT_TABS: PatientTab[] = [
   { key: "administrative", label: "Administrative", roles: ["psychologist", "admin"], render: AdministrativeTab },
   { key: "notes", label: "Clinical notes", roles: ["psychologist"], render: NotesTab },
   { key: "forms", label: "Consent & forms", roles: ["psychologist", "admin"], render: FormsTab },
+  { key: "billing", label: "Billing", roles: ["psychologist", "admin"], render: BillingTab },
   { key: "audit", label: "Audit", roles: ["psychologist"], render: AuditTab },
 ];
 

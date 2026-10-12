@@ -109,3 +109,13 @@
 /* Keep the phone bottom nav from covering content, including on devices with a home indicator. */
 .has-bottom-nav { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
 @media (min-width: 1024px) { .has-bottom-nav { padding-bottom: 0; } }
+
+/* Printing (receipts): hide the workspace chrome and anything marked .no-print; plain white page, black text, no shadows. */
+@media print {
+  .no-print { display: none !important; }
+  .has-bottom-nav { padding-bottom: 0; }
+  body, .bg-canvas { background: #fff !important; }
+  main { max-width: none !important; padding: 0 !important; }
+  .print-sheet { border: 0 !important; box-shadow: none !important; padding: 0 !important; }
+  a { color: inherit; text-decoration: none; }
+}
