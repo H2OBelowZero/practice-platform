@@ -113,7 +113,7 @@ it("staff may return a submitted form; the patient then edits and resubmits; sub
     await expect(c.query("update form_submissions set answers='{\"a\":9}' where id=$1", [id])).rejects.toThrow(/submission is immutable/);
     await expect(c.query("update form_submissions set status='draft' where id=$1", [id])).rejects.toThrow(/submission is immutable/);
     await expect(c.query("update form_submissions set submitted_at=null where id=$1", [id])).rejects.toThrow(/submission is immutable/);
-    await c.query("update form_submissions set status='returned' where id=$1", [id]);
+    await c.query("update form_submissions set status='returned', return_note='fix it' where id=$1", [id]);
   });
   expect((await sub(c, id)).status).toBe("returned");
   expect((await c.query("select action, actor_id from audit_log where entity_id=$1 order by id", [id])).rows).toEqual([{ action: "form.submit", actor_id: u1 }, { action: "form.return", actor_id: psy }]);
@@ -364,7 +364,7 @@ it("submission attribution: DB stamps submitted_by/submitted_at and audits every
   // submitted_by is frozen outside a submit
   await expect(c.query("update form_submissions set submitted_by=$2 where id=$1", [e, u1])).rejects.toThrow(/protected submission columns/);
   // resubmission after a return is a new, audited transition by the resubmitter
-  await asUser(c, psy, () => c.query("update form_submissions set status='returned' where id=$1", [b]));
+  await asUser(c, psy, () => c.query("update form_submissions set status='returned', return_note='fix it' where id=$1", [b]));
   expect((await sub(c, b)).submitted_by).toBe(u2);
   await asUser(c, u2, () => c.query("update form_submissions set status='submitted' where id=$1", [b]));
   expect((await audit(b)).length).toBe(2);
@@ -378,7 +378,7 @@ it("every submission is snapshotted: submit, return, edit, resubmit keeps both v
   await asUser(c, u1, () => c.query(`update form_submissions set answers='{"v":1}' where id=$1`, [id]));
   expect(await snaps()).toEqual([]); // drafts are not snapshotted
   await asUser(c, u1, () => c.query("update form_submissions set status='submitted' where id=$1", [id]));
-  await asUser(c, psy, () => c.query("update form_submissions set status='returned' where id=$1", [id]));
+  await asUser(c, psy, () => c.query("update form_submissions set status='returned', return_note='fix it' where id=$1", [id]));
   await asUser(c, u1, () => c.query(`update form_submissions set answers='{"v":2}' where id=$1`, [id]));
   expect((await snaps()).length).toBe(1); // editing a returned form does not snapshot
   await asUser(c, u1, () => c.query("update form_submissions set status='submitted' where id=$1", [id]));
@@ -416,7 +416,7 @@ it("expired guardian cannot set consent or write submissions; bookkeeper/associa
   await expect(asUser(c, u1, () => c.query("insert into form_submissions(patient_id,template_id,template_version) values ($1,gen_random_uuid(),1)", [p1]))).rejects.toThrow(/template_not_active/);
   // admin returns a submitted form, audited
   await asUser(c, u1, () => c.query("update form_submissions set status='submitted' where id=$1", [id]));
-  await asUser(c, adm, () => c.query("update form_submissions set status='returned' where id=$1", [id]));
+  await asUser(c, adm, () => c.query("update form_submissions set status='returned', return_note='fix it' where id=$1", [id]));
   expect((await sub(c, id)).status).toBe("returned");
   expect((await c.query("select actor_id, role from audit_log where entity_id=$1 and action='form.return'", [id])).rows).toEqual([{ actor_id: adm, role: "admin" }]);
 }));
