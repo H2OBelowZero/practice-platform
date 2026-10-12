@@ -12,9 +12,9 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const ID_KEYS = ["patient_id", "invoice_id", "claim_id", "appointment_id", "payment_id", "note_id", "member_id", "submission_id", "task_id"] as const;
 const COUNT_KEYS = ["version", "count", "rows", "attempts", "page", "reminders", "overdueTasks", "claimed", "sent", "retried", "failed", "deferred"] as const;
-const CODE_KEYS = ["reason", "status", "method", "template", "channel", "outcome", "code", "by_role", "report"] as const;
+const CODE_KEYS = ["reason", "status", "method", "template", "channel", "outcome", "code", "by_role", "report", "op", "key"] as const; // op / key: settings changes (insert, update, delete; the retention record type)
 const DATE_KEYS = ["from", "to"] as const; // YYYY-MM-DD, the period of a report export
-const FLAG_KEYS = ["late", "duplicate_confirmed", "truncated"] as const;
+const FLAG_KEYS = ["late", "duplicate_confirmed", "truncated", "sensitive"] as const;
 const LIST_KEYS = ["fields", "filters"] as const; // lists of field / filter NAMES
 const COUNTED_KEYS = ["errors"] as const; // shown as how many, never as the text
 

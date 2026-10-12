@@ -3,10 +3,11 @@ import { addDays, isRealDate, sastMidnight } from "@/lib/time";
 /** The action prefixes (the part before the dot) the application writes. The filter is a select over these, so no user text ever reaches the query. */
 export const AUDIT_PREFIXES = [
   "appointment", "audit", "auth", "booking", "claim", "consent", "credit_note", "cron", "export", "form", "invoice", "member", "note", "patient",
-  "payfast", "payment", "prefs", "task",
+  "payfast", "payment", "prefs", "settings", "task",
 ] as const;
 export const AUDIT_ENTITIES = [
-  "appointments", "audit_log", "claims", "clinical_notes", "credit_notes", "form_submissions", "invoices", "medical_aid_members", "patients", "payments", "session", "tasks",
+  "appointments", "audit_log", "availability_rules", "blocked_times", "claims", "clinical_notes", "credit_notes", "form_submissions", "invoices", "medical_aid_members", "patients", "payments",
+  "practices", "retention_policies", "session", "session_types", "tasks",
 ] as const;
 export const AUDIT_ROLES = ["psychologist", "admin", "bookkeeper", "associate", "patient", "guardian", "system"] as const;
 

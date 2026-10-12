@@ -38,7 +38,7 @@ test.describe("settings as the psychologist", () => {
     await expect(page.getByText("This change was recorded in the audit log.")).toBeVisible();
 
     // the audit log shows the change by field name, never the text
-    await page.goto("/app/audit?action=settings.payment_instructions");
+    await page.goto("/app/audit?prefix=settings&entity=practices");
     await expect(page.getByText("payment_instructions").first()).toBeVisible();
     await expect(page.getByText("Account: 0000000000")).toHaveCount(0);
   });

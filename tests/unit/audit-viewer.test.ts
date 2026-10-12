@@ -47,10 +47,12 @@ describe("auditDetailParts: whitelist", () => {
         "filters",
         "from",
         "invoice_id",
+        "key",
         "late",
         "member_id",
         "method",
         "note_id",
+        "op",
         "outcome",
         "overdueTasks",
         "page",
@@ -61,6 +63,7 @@ describe("auditDetailParts: whitelist", () => {
         "report",
         "retried",
         "rows",
+        "sensitive",
         "sent",
         "status",
         "submission_id",
@@ -93,6 +96,8 @@ describe("filters", () => {
     expect(parseAuditFilters({})).toEqual({ prefix: "", entity: "", role: "", from: "", to: "" });
     expect(AUDIT_PREFIXES).toContain("export");
     expect(AUDIT_PREFIXES).toContain("audit");
+    expect(AUDIT_PREFIXES).toContain("settings"); // the 0027 trigger writes settings.change / settings.payment_instructions
+    for (const e of ["practices", "session_types", "availability_rules", "blocked_times", "retention_policies"]) expect(AUDIT_ENTITIES).toContain(e);
     expect(AUDIT_ENTITIES).toContain("audit_log");
   });
   it("reports which filters are set, by name", () => {
@@ -136,5 +141,13 @@ describe("hideViews and prefetch detection", () => {
     const h = (o: HeadersInit) => new Headers(o);
     for (const o of [{ "next-router-prefetch": "1" }, { rsc: "1" }, { purpose: "prefetch" }, { "sec-purpose": "prefetch;prerender" }] as Record<string, string>[]) expect(isPrefetch(h(o)), JSON.stringify(o)).toBe(true);
     for (const o of [{}, { accept: "text/csv" }, { purpose: "navigate" }, { "sec-fetch-dest": "document" }] as Record<string, string>[]) expect(isPrefetch(h(o)), JSON.stringify(o)).toBe(false);
+  });
+});
+
+describe("settings changes (0027)", () => {
+  it("shows the operation, the retention key, the sensitive flag and the field NAMES, nothing else", () => {
+    expect(auditDetailParts({ op: "update", fields: ["payment_instructions"], sensitive: true })).toEqual(expect.arrayContaining(["op: update", "sensitive: yes", "fields: payment_instructions"]));
+    expect(auditDetailParts({ op: "update", key: "clinical_notes", fields: ["legal_hold", "retain_years"] })).toEqual(expect.arrayContaining(["key: clinical_notes", "fields: legal_hold, retain_years"]));
+    expect(auditDetailParts({ op: "Bank: Evil acc 123", fields: ["Bank: Evil"] })).toEqual([]); // free text is still dropped
   });
 });
