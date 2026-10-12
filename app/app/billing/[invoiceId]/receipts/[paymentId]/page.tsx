@@ -8,7 +8,7 @@ import { formatZar } from "@/lib/money";
 import { supabaseServer } from "@/lib/supabase/server";
 import { sastDayShort } from "@/lib/time";
 import { PageHeader } from "@/components/ui/page-header";
-import { PrintButton } from "./print-button";
+import { PrintButton } from "@/components/ui/print-button";
 
 export const metadata = { title: "Receipt" };
 

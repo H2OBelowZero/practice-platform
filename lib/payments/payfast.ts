@@ -124,3 +124,16 @@ export async function payfastValidate(rawBody: string): Promise<boolean> {
     return (await res.text()).trim() === "VALID";
   } finally { clearTimeout(timer); }
 }
+
+/**
+ * Can a checkout be built with this environment? The portal asks before it offers the PayFast button and again when a checkout is started,
+ * so a missing merchant id / key, a missing passphrase outside the sandbox, or a missing APP_URL in production shows the friendly
+ * "online payment is not available" text instead of an error page. (buildCheckout still throws on the same conditions.)
+ */
+export function payfastAvailable(env: Record<string, string | undefined> = process.env): boolean {
+  const has = (k: string) => !!env[k]?.trim();
+  if (!has("PAYFAST_MERCHANT_ID") || !has("PAYFAST_MERCHANT_KEY")) return false;
+  if (!has("PAYFAST_PASSPHRASE") && env.PAYFAST_SANDBOX !== "true") return false;
+  if (!has("APP_URL") && env.NODE_ENV === "production") return false;
+  return true;
+}

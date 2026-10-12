@@ -23,7 +23,7 @@ export const isOverdue = (inv: { status: string; due_date: string }, today: stri
 
 const AUDIT_TEXT: Record<string, string> = {
   "invoice.create": "Draft invoice created", "invoice.update": "Draft edited", "invoice.issue": "Invoice issued", "invoice.void": "Invoice voided",
-  "payment.record": "Payment recorded", "credit_note.create": "Credit note added",
+  "payment.record": "Payment recorded", "payment.checkout_started": "Patient started an online payment", "credit_note.create": "Credit note added",
 };
 /** Plain wording for an audit action on an invoice; an unknown action is shown as readable text, never blank. */
 export const invoiceEventText = (action: string): string => AUDIT_TEXT[action] ?? (action.replace(/[._]/g, " ").replace(/^./, (c) => c.toUpperCase()));
