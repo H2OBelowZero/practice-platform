@@ -68,5 +68,14 @@ export function rangeText(r: DateRange): string {
   return r.from === r.to ? f(r.from) : `${f(r.from)} to ${f(r.to)}`;
 }
 
+/** Debtors can only be worked out for a date this many days back or less (the database refuses older ones). */
+export const DEBTORS_MAX_AGE_DAYS = 800;
+
+/** Why debtors cannot be shown as at `asOf`, or null. */
+export function debtorsProblem(asOf: string, today: string): string | null {
+  return (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${asOf}T00:00:00Z`)) / 86400000 > DEBTORS_MAX_AGE_DAYS
+    ? `Debtors can only be shown as at a date within the last ${DEBTORS_MAX_AGE_DAYS} days (about two years). Choose a period that ends more recently.` : null;
+}
+
 /** The debtors report is "as at" a day that cannot be in the future: the end of the period, or today when the period runs past today. */
 export const debtorsAsOf = (to: string, today: string): string => (to < today ? to : today);

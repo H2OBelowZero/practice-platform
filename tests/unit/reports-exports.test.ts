@@ -60,6 +60,7 @@ describe("CSV column definitions are stable", () => {
           "invoices",
           "invoiced_zar",
           "vat_zar",
+          "vat_credited_zar",
           "received_zar",
           "credit_notes_zar",
         ],
@@ -92,10 +93,10 @@ describe("CSV column definitions are stable", () => {
 
 describe("row shaping", () => {
   it("income by month: rand as numbers, month as YYYY-MM, VAT blank unless the practice is VAT registered", () => {
-    const rows = [{ month: "2030-01-01", invoices: 2, invoicedCents: 123450, vatCents: 16102, receivedCents: 50000, creditCents: 1150 }];
-    expect(incomeByMonthCsv(rows, true)).toEqual([{ month: "2030-01", invoices: 2, invoiced_zar: 1234.5, vat_zar: 161.02, received_zar: 500, credit_notes_zar: 11.5 }]);
-    expect(incomeByMonthCsv(rows, false)[0].vat_zar).toBeNull();
-    expect(toCsv(incomeByMonthCsv(rows, true), EXPORT_COLUMNS.income_by_month)).toBe("month,invoices,invoiced_zar,vat_zar,received_zar,credit_notes_zar\n2030-01,2,1234.5,161.02,500,11.5");
+    const rows = [{ month: "2030-01-01", invoices: 2, invoicedCents: 123450, vatCents: 16102, vatCreditedCents: 1500, receivedCents: 50000, creditCents: 11500 }];
+    expect(incomeByMonthCsv(rows, true)).toEqual([{ month: "2030-01", invoices: 2, invoiced_zar: 1234.5, vat_zar: 161.02, vat_credited_zar: 15, received_zar: 500, credit_notes_zar: 115 }]);
+    expect(incomeByMonthCsv(rows, false)[0]).toMatchObject({ vat_zar: null, vat_credited_zar: null });
+    expect(toCsv(incomeByMonthCsv(rows, true), EXPORT_COLUMNS.income_by_month)).toBe("month,invoices,invoiced_zar,vat_zar,vat_credited_zar,received_zar,credit_notes_zar\n2030-01,2,1234.5,161.02,15,500,115");
   });
   it("transactions: credit notes are negative numbers (not turned into text), no patient column", () => {
     const csv = toCsv(transactionsCsv([
@@ -161,8 +162,8 @@ describe("shaping the flat tables", () => {
 
 describe("fetching", () => {
   it("bigint strings become numbers, nulls stay null, and the call sends p_from / p_to exactly as the SQL names them", async () => {
-    const { sb, calls } = fake({ report_income_by_month: [{ month_start: "2030-01-01", invoices_n: "2", invoiced_cents: "123450", vat_cents: "0", received_cents: 5, credit_cents: null }] });
-    expect(await fetchIncomeByMonth(sb, { from: "2030-01-01", to: "2030-03-31" })).toEqual([{ month: "2030-01-01", invoices: 2, invoicedCents: 123450, vatCents: 0, receivedCents: 5, creditCents: 0 }]);
+    const { sb, calls } = fake({ report_income_by_month: [{ month_start: "2030-01-01", invoices_n: "2", invoiced_cents: "123450", vat_cents: "0", vat_credited_cents: "7", received_cents: 5, credit_cents: null }] });
+    expect(await fetchIncomeByMonth(sb, { from: "2030-01-01", to: "2030-03-31" })).toEqual([{ month: "2030-01-01", invoices: 2, invoicedCents: 123450, vatCents: 0, vatCreditedCents: 7, receivedCents: 5, creditCents: 0 }]);
     expect(calls).toEqual([{ fn: "report_income_by_month", args: { p_from: "2030-01-01", p_to: "2030-03-31" } }]);
   });
   it("an error becomes a ReportQueryError carrying a code and never the message text", async () => {

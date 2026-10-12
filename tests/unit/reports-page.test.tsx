@@ -18,10 +18,10 @@ const rpcArgs = (q: Query) => q.calls.find((c) => c.m === "rpc")?.a[0] as Record
 const rpcNames = () => h.log.filter((q) => q.table.startsWith("rpc:")).map((q) => q.table.slice(4));
 const tables = () => h.log.filter((q) => !q.table.startsWith("rpc:")).map((q) => q.table);
 
-const month = (m: string, o: Record<string, number> = {}) => ({ month_start: m, invoices_n: 0, invoiced_cents: 0, vat_cents: 0, received_cents: 0, credit_cents: 0, ...o });
+const month = (m: string, o: Record<string, number> = {}) => ({ month_start: m, invoices_n: 0, invoiced_cents: 0, vat_cents: 0, vat_credited_cents: 0, received_cents: 0, credit_cents: 0, ...o });
 const data: Record<string, unknown> = {
   report_income_by_month: [
-    month("2031-01-01", { invoices_n: 2, invoiced_cents: 300000, vat_cents: 39130, received_cents: 150000, credit_cents: 5000 }),
+    month("2031-01-01", { invoices_n: 2, invoiced_cents: 300000, vat_cents: 39130, vat_credited_cents: 652, received_cents: 150000, credit_cents: 5000 }),
     month("2031-02-01", { invoices_n: 1, invoiced_cents: 100000, vat_cents: 13043, received_cents: 250000 }),
     month("2031-03-01"),
   ],
@@ -101,7 +101,7 @@ describe("/app/reports: Financial", () => {
 
   it("puts a plain-language definition under every section", async () => {
     const out = await render();
-    expect(out).toContain("Invoiced = the total of invoices issued in that month, excluding drafts and void invoices");
+    expect(out).toContain("Invoiced = the total of invoices issued in that month, excluding drafts and invoices you voided by hand");
     expect(out).toContain("Debtors are invoices that were issued and are not yet fully settled");
     expect((out.match(/What this means\. /g) ?? []).length).toBeGreaterThanOrEqual(6);
     expect(out).toContain("Clinical outcome analytics are not part of this release");
@@ -119,6 +119,8 @@ describe("/app/reports: Financial", () => {
     const out = await render();
     expect(out).toMatch(/scope="col"[^>]*>VAT included</);
     expect(out).toContain("R 391,30");
+    expect(out).toMatch(/scope="col"[^>]*>VAT on credit notes</);
+    expect(out).toContain("R 6,52");
   });
 
   it("every CSV control is a plain download anchor to the export route with the dates on screen, and the accountant export is explained", async () => {
@@ -193,6 +195,30 @@ describe("/app/reports: Financial", () => {
     expect(out).not.toContain("<script>alert(1)");
     expect(out).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(out).not.toContain("<img src=x");
+  });
+});
+
+describe("/app/reports: debtors for an old period", () => {
+  it("a period that ended more than 800 days ago explains instead of failing, and does not ask the database for debtors", async () => {
+    const out = await render({ preset: "custom", from: "2027-01-01", to: "2028-12-01" });
+    expect(out).toContain("Debtors can only be shown as at a date within the last 800 days");
+    expect(out).not.toContain("We couldn&#x27;t load this report just now");
+    expect(rpcNames()).not.toContain("report_debtors_ageing");
+    expect(rpcNames()).not.toContain("report_debtors_detail");
+    expect(rpcNames()).toContain("report_income_by_month");
+  });
+  it("the definitions say what the owner needs to know", async () => {
+    const out = await render();
+    expect(out).toContain("they include invoices that were paid or credited off later");
+    expect(out).toContain("cancelled by credit notes");
+    expect(out).toContain("still counts in the month it was issued");
+    h.role = "admin";
+    const appt = await render({ report: "appointments" });
+    expect(appt).toContain("Working hours that overlap each other are counted separately");
+    expect(appt).toContain("over 100%");
+    expect(appt).toContain("even for older sessions");
+    expect(appt).toContain("cancellations made by the practice as well as by the patient");
+    expect(await render()).toContain("adds up to the invoice&#x27;s VAT to the cent");
   });
 });
 

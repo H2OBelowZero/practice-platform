@@ -36,7 +36,8 @@ export function FinancialReport({ f, role, period }: { f: Financial; role: Role;
               { header: "Month", cell: (r) => monthLabel(r.month) },
               { header: "Invoices", num: true, cell: (r) => r.invoices, total: sum(inc.data, (r) => r.invoices) },
               { header: "Invoiced", num: true, cell: (r) => <>{money(r.invoicedCents)}<Bar value={r.invoicedCents} max={maxInv} /></>, total: money(sum(inc.data, (r) => r.invoicedCents)) },
-              ...(vat ? [{ header: "VAT included", num: true, cell: (r: (typeof inc.data)[number]) => money(r.vatCents), total: money(sum(inc.data, (r) => r.vatCents)) }] : []),
+              ...(vat ? [{ header: "VAT included", num: true, cell: (r: (typeof inc.data)[number]) => money(r.vatCents), total: money(sum(inc.data, (r) => r.vatCents)) },
+                { header: "VAT on credit notes", num: true, cell: (r: (typeof inc.data)[number]) => money(r.vatCreditedCents), total: money(sum(inc.data, (r) => r.vatCreditedCents)) }] : []),
               { header: "Received", num: true, cell: (r) => <>{money(r.receivedCents)}<Bar value={r.receivedCents} max={maxInv} tone="blue" /></>, total: money(sum(inc.data, (r) => r.receivedCents)) },
               { header: "Credit notes", num: true, cell: (r) => money(r.creditCents), total: money(sum(inc.data, (r) => r.creditCents)) },
             ]} />
@@ -68,7 +69,7 @@ export function FinancialReport({ f, role, period }: { f: Financial; role: Role;
       </ReportSection>
 
       <ReportSection id="debtors" title="Debtors by age" intro={`Money still owed on issued invoices as at ${rangeText({ from: f.asOf, to: f.asOf })}.`} exportHref={exportHref("debtors", period)}
-        state={!age.ok ? "failed" : sum(age.data, (r) => r.outstandingCents) === 0 ? "empty" : "ok"} emptyText="Nothing is outstanding." definition={DEFINITIONS.debtors}>
+        state={!age.ok ? "failed" : f.debtorsProblem || sum(age.data, (r) => r.outstandingCents) === 0 ? "empty" : "ok"} emptyText={f.debtorsProblem ?? "Nothing is outstanding."} definition={DEFINITIONS.debtors}>
         {age.ok && (
           <>
             <div className="mb-4 grid gap-3 sm:grid-cols-3">
@@ -89,7 +90,7 @@ export function FinancialReport({ f, role, period }: { f: Financial; role: Role;
       </ReportSection>
 
       <ReportSection id="debtor-list" title="Open invoices" intro="Oldest due date first." state={!deb.ok ? "failed" : deb.data.rows.length === 0 ? "empty" : "ok"}
-        emptyText="There are no open invoices." definition="One line per invoice that is still owing, with the same figures as the age table above.">
+        emptyText={f.debtorsProblem ?? "There are no open invoices."} definition="One line per invoice that is still owing, with the same figures as the age table above.">
         {deb.ok && (
           <>
             {canSeeNames && deb.data.names === null && deb.data.rows.length > 0 && <p className="mb-3 text-ink-muted">Patient names could not be loaded just now. Refresh the page to try again.</p>}

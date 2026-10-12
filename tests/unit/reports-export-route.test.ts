@@ -35,7 +35,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2031-03-10T07:30:00Z"));
   h.role = "psychologist"; h.resolve = base; h.log.length = 0; h.order.length = 0; h.audits.length = 0; h.auditFails = false; vat = false;
   rows = {
-    report_income_by_month: [{ month_start: "2031-01-01", invoices_n: 2, invoiced_cents: 123450, vat_cents: 16102, received_cents: 50000, credit_cents: 1150 }],
+    report_income_by_month: [{ month_start: "2031-01-01", invoices_n: 2, invoiced_cents: 123450, vat_cents: 16102, vat_credited_cents: 1500, received_cents: 50000, credit_cents: 11500 }],
     report_transactions: [
       { txn_date: "2031-01-05", kind: "payment", invoice_number: "INV-00001", method: "eft", reference: "=cmd|' /C calc'!A0", portion: "patient", amount_cents: 5750, vat_cents: null },
       { txn_date: "2031-01-06", kind: "credit_note", invoice_number: "INV-00001", method: "credit_note", reference: null, portion: "patient", amount_cents: -1150, vat_cents: null },
@@ -53,11 +53,11 @@ describe("report CSV export: the happy path", () => {
     expect(res.headers.get("Content-Disposition")).toBe('attachment; filename="income_by_month-2031-01-01-2031-03-31.csv"');
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
-    expect(await res.text()).toBe("month,invoices,invoiced_zar,vat_zar,received_zar,credit_notes_zar\n2031-01,2,1234.5,,500,11.5\n");
+    expect(await res.text()).toBe("month,invoices,invoiced_zar,vat_zar,vat_credited_zar,received_zar,credit_notes_zar\n2031-01,2,1234.5,,,500,115\n");
   });
   it("VAT is filled in only for a VAT-registered practice", async () => {
     vat = true;
-    expect((await (await get(OK)).text()).split("\n")[1]).toBe("2031-01,2,1234.5,161.02,500,11.5");
+    expect((await (await get(OK)).text()).split("\n")[1]).toBe("2031-01,2,1234.5,161.02,15,500,115");
   });
   it("calls the report function with the SQL parameter names, as the signed-in user's client", async () => {
     await get(OK);
@@ -86,6 +86,28 @@ describe("report CSV export: the happy path", () => {
     await get("report=debtors&from=2031-01-01&to=2031-12-31");
     const args = h.log.filter((q) => q.table === "rpc:report_debtors_detail").map(rpcArgs);
     expect(args).toEqual([{ p_as_of: "2031-02-15" }, { p_as_of: "2031-03-10" }]);
+  });
+});
+
+describe("report CSV export: debtors", () => {
+  it("is named for the date it is as at (the end of the period, or today when the period runs on)", async () => {
+    expect((await get("report=debtors&from=2031-01-01&to=2031-02-15")).headers.get("Content-Disposition")).toBe('attachment; filename="debtors-as-at-2031-02-15.csv"');
+    expect((await get("report=debtors&from=2031-01-01&to=2031-12-31")).headers.get("Content-Disposition")).toBe('attachment; filename="debtors-as-at-2031-03-10.csv"');
+  });
+  it("a period that ended more than 800 days ago is a 422 that says why, with nothing read or audited", async () => {
+    const res = await get("report=debtors&from=2027-01-01&to=2028-12-01");
+    expect(res.status).toBe(422);
+    expect(res.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
+    expect(await res.text()).toContain("within the last 800 days");
+    expect(h.log).toHaveLength(0);
+    expect(h.audits).toHaveLength(0);
+  });
+  it("a range the database refuses is a 422, not a generic failure", async () => {
+    h.resolve = (q) => (q.table === "rpc:report_income_by_method" ? { error: { code: "P0001", message: "invalid_range" } } : base(q));
+    const res = await get("report=income_by_method&from=2031-01-01&to=2031-01-31");
+    expect(res.status).toBe(422);
+    expect(await res.text()).toContain("outside what can be reported");
+    expect(h.audits).toHaveLength(0);
   });
 });
 

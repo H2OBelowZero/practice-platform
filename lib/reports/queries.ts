@@ -5,7 +5,7 @@ import { CONSENT_PURPOSES } from "@/lib/forms/validate";
 // never uses the service client. bigint columns arrive as strings or numbers depending on the driver, so every number goes through num().
 
 export class ReportQueryError extends Error {
-  constructor(readonly code: string, readonly reason: "too_many_rows" | "failed") { super(`report_query_failed:${code}`); }
+  constructor(readonly code: string, readonly reason: "too_many_rows" | "invalid_range" | "failed") { super(`report_query_failed:${code}`); }
 }
 
 type Row = Record<string, unknown>;
@@ -13,10 +13,10 @@ const num = (v: unknown): number => Number(v ?? 0);
 const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
 const str = (v: unknown): string => String(v ?? "");
 
-/** Call a report function and return its rows; the error message is reduced to a code (it may echo a value), except the one case the CSV route explains to the person. */
+/** Call a report function and return its rows; the error message is reduced to a code (it may echo a value), except the two cases the CSV route explains to the person (too many rows, a date range the database refuses). */
 export async function rpcRows(sb: SupabaseClient, fn: string, args: Record<string, string>): Promise<Row[]> {
   const { data, error } = await sb.rpc(fn, args);
-  if (error) throw new ReportQueryError(error.code ?? "", /too_many_rows/.test(error.message ?? "") ? "too_many_rows" : "failed");
+  if (error) throw new ReportQueryError(error.code ?? "", /too_many_rows/.test(error.message ?? "") ? "too_many_rows" : /invalid_range/.test(error.message ?? "") ? "invalid_range" : "failed");
   return (data ?? []) as Row[];
 }
 
@@ -24,10 +24,10 @@ type Range = { from: string; to: string };
 const range = (r: Range) => ({ p_from: r.from, p_to: r.to });
 
 // ---- financial ---------------------------------------------------------------------------------------------------------------------------
-export type IncomeMonth = { month: string; invoices: number; invoicedCents: number; vatCents: number; receivedCents: number; creditCents: number };
+export type IncomeMonth = { month: string; invoices: number; invoicedCents: number; vatCents: number; vatCreditedCents: number; receivedCents: number; creditCents: number };
 export const fetchIncomeByMonth = async (sb: SupabaseClient, r: Range): Promise<IncomeMonth[]> =>
   (await rpcRows(sb, "report_income_by_month", range(r))).map((x) => ({
-    month: str(x.month_start), invoices: num(x.invoices_n), invoicedCents: num(x.invoiced_cents), vatCents: num(x.vat_cents), receivedCents: num(x.received_cents), creditCents: num(x.credit_cents),
+    month: str(x.month_start), invoices: num(x.invoices_n), invoicedCents: num(x.invoiced_cents), vatCents: num(x.vat_cents), vatCreditedCents: num(x.vat_credited_cents), receivedCents: num(x.received_cents), creditCents: num(x.credit_cents),
   }));
 
 export type MethodRow = { method: string; payments: number; receivedCents: number };

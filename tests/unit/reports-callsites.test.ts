@@ -122,6 +122,33 @@ describe("tripwires on the reports code", () => {
   });
 });
 
+describe("report_compliance only counts audit actions that something writes", () => {
+  // Task 16c's settings audit triggers will write settings.* / practice.* actions; until then those two families legitimately count zero.
+  const NOT_WRITTEN_YET = ["settings.%", "practice.%"];
+  const body = sql.slice(sql.indexOf("create function report_compliance("), sql.indexOf("create function report_transactions("));
+  const counted = [...new Set([...body.matchAll(/l\.action (?:= |like )'([a-z_.%]+)'/g)].map((m) => m[1]))];
+  const writers = [
+    ...readdirSync(join(root, "supabase", "migrations")).filter((f) => f !== "0025_reports.sql" && f.endsWith(".sql")).map((f) => read("supabase", "migrations", f)),
+    ...["app", "lib"].flatMap((d) => files(join(root, d))).map((f) => strip(readFileSync(f, "utf8"))),
+  ].join("\n");
+
+  it("lists the actions the SQL counts (so a new one is a deliberate change)", () => {
+    expect(counted.sort()).toEqual(["auth.login", "claim.view", "consent.grant", "consent.withdraw", "export.%", "note.addendum", "note.view", "patient.view", "payfast.itn.rejected", "practice.%", "settings.%"]);
+  });
+  it("every counted action, except the allow-listed families, is written somewhere in the migrations or the app", () => {
+    const missing = counted.filter((a) => !NOT_WRITTEN_YET.includes(a)).filter((a) => {
+      if (a === "consent.grant" || a === "consent.withdraw") return !/'consent\.'\s*\|\|\s*case when p_granted then 'grant' else 'withdraw' end/.test(writers); // _set_consent_core builds the name
+      if (a.endsWith(".%")) return !new RegExp("[\"'`]" + a.slice(0, -1).replace(".", "\\.") + "[a-z_]+[\"'`]").test(writers);
+      return !new RegExp("[\"']" + a.replace(".", "\\.") + "[\"']").test(writers);
+    });
+    expect(missing).toEqual([]);
+  });
+  it("the allow-list is exactly the settings families, and nothing writes them yet (this test is the reminder to remove them from the list when 16c lands)", () => {
+    expect(NOT_WRITTEN_YET).toEqual(["settings.%", "practice.%"]);
+    expect(counted).toEqual(expect.arrayContaining(NOT_WRITTEN_YET));
+  });
+});
+
 describe("0025 itself", () => {
   it("is invoker except for the one documented definer, with a pinned search_path and R4 grants for every function", () => {
     for (const fn of Object.keys(sqlFns)) {

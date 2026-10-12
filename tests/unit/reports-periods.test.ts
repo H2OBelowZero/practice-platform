@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addMonths, debtorsAsOf, DEFAULT_PRESET, MAX_SPAN_DAYS, parsePeriod, presetRange, rangeProblem, rangeText } from "@/lib/reports/periods";
+import { addMonths, debtorsProblem, debtorsAsOf, DEFAULT_PRESET, MAX_SPAN_DAYS, parsePeriod, presetRange, rangeProblem, rangeText } from "@/lib/reports/periods";
 
 describe("addMonths", () => {
   it("moves by whole months across year ends", () => {
@@ -88,6 +88,14 @@ describe("parsePeriod", () => {
   });
   it("an unknown preset word is ignored (no error), and cannot smuggle anything into a query", () => {
     expect(parsePeriod({ preset: "yesterday'; drop table" }, today)).toEqual({ preset: "last_3_months", from: "2030-01-01", to: "2030-03-15", problem: null });
+  });
+});
+
+describe("how far back debtors can go", () => {
+  it("800 days is fine, 801 is explained", () => {
+    expect(debtorsProblem("2028-12-30", "2031-03-10")).toBeNull(); // 800 days
+    expect(debtorsProblem("2028-12-29", "2031-03-10")).toMatch(/within the last 800 days/);
+    expect(debtorsProblem("2031-03-10", "2031-03-10")).toBeNull();
   });
 });
 

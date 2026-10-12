@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Role } from "@/lib/auth/roles";
 import type { Section } from "@/lib/dashboard/shape";
-import { debtorsAsOf, type DateRange } from "./periods";
+import { debtorsAsOf, debtorsProblem, type DateRange } from "./periods";
 import {
   fetchActivity, fetchAgeing, fetchAppointments, fetchCompliance, fetchDebtors, fetchIncomeByMethod, fetchIncomeByMonth, fetchIncomeBySessionType,
   type Activity, type AgeingRow, type AppointmentRow, type Compliance, type DebtorRow, type IncomeMonth, type MethodRow, type SessionTypeRow,
@@ -21,7 +21,7 @@ export const DEBTOR_ROWS_SHOWN = 200;
 export type Debtors = { rows: DebtorRow[]; total: number; names: Record<string, string> | null };
 export type Financial = {
   vatRegistered: Section<boolean>; income: Section<IncomeMonth[]>; methods: Section<MethodRow[]>; sessionTypes: Section<SessionTypeRow[]>;
-  ageing: Section<AgeingRow[]>; debtors: Section<Debtors>; asOf: string;
+  ageing: Section<AgeingRow[]>; debtors: Section<Debtors>; asOf: string; debtorsProblem: string | null;
 };
 
 /**
@@ -37,6 +37,7 @@ async function patientNames(sb: SupabaseClient, ids: string[]): Promise<Record<s
 
 export async function loadFinancial(sb: SupabaseClient, role: Role, r: DateRange, today: string): Promise<Financial> {
   const asOf = debtorsAsOf(r.to, today);
+  const tooOld = debtorsProblem(asOf, today); // a period that ended long ago: the debtors are not queried (the database would refuse) and the page explains
   const [vatRegistered, income, methods, sessionTypes, ageing, debtors] = await Promise.all([
     reportSection("vat", async () => {
       const { data, error } = await sb.from("practices").select("vat_registered").limit(1).maybeSingle();
@@ -46,8 +47,8 @@ export async function loadFinancial(sb: SupabaseClient, role: Role, r: DateRange
     reportSection("income_by_month", () => fetchIncomeByMonth(sb, r)),
     reportSection("income_by_method", () => fetchIncomeByMethod(sb, r)),
     reportSection("income_by_session_type", () => fetchIncomeBySessionType(sb, r)),
-    reportSection("debtors_ageing", () => fetchAgeing(sb, asOf)),
-    reportSection("debtors_detail", async (): Promise<Debtors> => {
+    tooOld ? Promise.resolve<Section<AgeingRow[]>>({ ok: true, data: [] }) : reportSection("debtors_ageing", () => fetchAgeing(sb, asOf)),
+    tooOld ? Promise.resolve<Section<Debtors>>({ ok: true, data: { rows: [], total: 0, names: {} } }) : reportSection("debtors_detail", async (): Promise<Debtors> => {
       const all = await fetchDebtors(sb, asOf);
       const rows = all.slice(0, DEBTOR_ROWS_SHOWN);
       // the bookkeeper's rows carry no patient id and the bookkeeper is not asked for names
@@ -55,7 +56,7 @@ export async function loadFinancial(sb: SupabaseClient, role: Role, r: DateRange
       return { rows, total: all.length, names: role === "bookkeeper" ? null : await patientNames(sb, ids) };
     }),
   ]);
-  return { vatRegistered, income, methods, sessionTypes, ageing, debtors, asOf };
+  return { vatRegistered, income, methods, sessionTypes, ageing, debtors, asOf, debtorsProblem: tooOld };
 }
 
 export const loadAppointmentsReport = (sb: SupabaseClient, r: DateRange): Promise<Section<AppointmentRow[]>> => reportSection("appointments", () => fetchAppointments(sb, r));

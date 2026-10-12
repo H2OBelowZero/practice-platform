@@ -15,7 +15,7 @@ import {
 export type CsvRow = Record<string, CsvCell>;
 
 export const EXPORT_COLUMNS: Record<ExportKey, string[]> = {
-  income_by_month: ["month", "invoices", "invoiced_zar", "vat_zar", "received_zar", "credit_notes_zar"],
+  income_by_month: ["month", "invoices", "invoiced_zar", "vat_zar", "vat_credited_zar", "received_zar", "credit_notes_zar"],
   income_by_method: ["method", "payments", "received_zar"],
   income_by_session_type: ["session_type", "invoices", "invoiced_zar"],
   debtors: ["as_of", "invoice_number", "due_date", "days_overdue", "age_bucket", "payer", "outstanding_zar", "scheme_zar", "patient_zar"],
@@ -26,7 +26,7 @@ export const EXPORT_COLUMNS: Record<ExportKey, string[]> = {
 };
 
 export const incomeByMonthCsv = (rows: IncomeMonth[], vatRegistered: boolean): CsvRow[] =>
-  rows.map((r) => ({ month: r.month.slice(0, 7), invoices: r.invoices, invoiced_zar: zar(r.invoicedCents), vat_zar: vatRegistered ? zar(r.vatCents) : null, received_zar: zar(r.receivedCents), credit_notes_zar: zar(r.creditCents) }));
+  rows.map((r) => ({ month: r.month.slice(0, 7), invoices: r.invoices, invoiced_zar: zar(r.invoicedCents), vat_zar: vatRegistered ? zar(r.vatCents) : null, vat_credited_zar: vatRegistered ? zar(r.vatCreditedCents) : null, received_zar: zar(r.receivedCents), credit_notes_zar: zar(r.creditCents) }));
 export const incomeByMethodCsv = (rows: MethodRow[]): CsvRow[] => rows.map((r) => ({ method: r.method, payments: r.payments, received_zar: zar(r.receivedCents) }));
 export const incomeBySessionTypeCsv = (rows: SessionTypeRow[]): CsvRow[] => rows.map((r) => ({ session_type: r.sessionType, invoices: r.invoices, invoiced_zar: zar(r.invoicedCents) }));
 export const debtorsCsv = (rows: DebtorRow[], asOf: string): CsvRow[] =>

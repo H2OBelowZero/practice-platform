@@ -4,7 +4,7 @@ import { isPrefetch } from "@/lib/audit-viewer/filters";
 import { toCsv } from "@/lib/reports/csv";
 import { EXPORT_COLUMNS, exportRows } from "@/lib/reports/exports";
 import { canExport, exportQuery, REPORT_ROLES } from "@/lib/reports/keys";
-import { debtorsAsOf } from "@/lib/reports/periods";
+import { debtorsAsOf, debtorsProblem } from "@/lib/reports/periods";
 import { ReportQueryError } from "@/lib/reports/queries";
 import { supabaseServer } from "@/lib/supabase/server";
 import { sastDate } from "@/lib/time";
@@ -34,6 +34,14 @@ export async function GET(req: Request): Promise<Response> {
   const { report, from, to } = q.data;
   if (!canExport(role, report)) return text("You do not have access to this report.", 403);
 
+  // debtors are "as at" one date (the end of the period, at most today), so the file is named for that date and an end date too far back is explained, not a generic failure
+  const today = sastDate(new Date());
+  const asOf = debtorsAsOf(to, today);
+  if (report === "debtors") {
+    const problem = debtorsProblem(asOf, today);
+    if (problem) return text(problem, 422);
+  }
+
   const sb = await supabaseServer();
   let rows;
   try {
@@ -42,9 +50,10 @@ export async function GET(req: Request): Promise<Response> {
       const { data } = await sb.from("practices").select("vat_registered").limit(1).maybeSingle();
       vatRegistered = (data as { vat_registered?: boolean } | null)?.vat_registered === true;
     }
-    rows = await exportRows(sb, report, { from, to }, { vatRegistered, asOf: debtorsAsOf(to, sastDate(new Date())) });
+    rows = await exportRows(sb, report, { from, to }, { vatRegistered, asOf });
   } catch (e) {
     if (e instanceof ReportQueryError && e.reason === "too_many_rows") return text("This period has too many lines for one file. Please choose a shorter period.", 422);
+    if (e instanceof ReportQueryError && e.reason === "invalid_range") return text("The dates for this report are outside what can be reported. Please choose a period that ends more recently and is no longer than two years.", 422);
     console.error("report export failed:", e instanceof Error ? e.message.slice(0, 60) : "unknown");
     return text("The export could not be prepared. Please try again.", 500);
   }
@@ -58,6 +67,6 @@ export async function GET(req: Request): Promise<Response> {
 
   return new Response(`${toCsv(rows, EXPORT_COLUMNS[report])}\n`, {
     status: 200,
-    headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${report}-${from}-${to}.csv"`, ...HEADERS },
+    headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${report === "debtors" ? `debtors-as-at-${asOf}` : `${report}-${from}-${to}`}.csv"`, ...HEADERS },
   });
 }
