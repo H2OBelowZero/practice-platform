@@ -22,7 +22,7 @@ async function seedPatients(c: Client) {
   const pa = (await c.query("insert into patients(user_id,first_name,last_name) values ($1,'A','One') returning id", [ua])).rows[0].id;
   const pb = (await c.query("insert into patients(user_id,first_name,last_name) values ($1,'B','Two') returning id", [ub])).rows[0].id;
   await c.query("update practices set approval_mode='auto'");
-  await c.query("insert into availability_rules(weekday,start_time,end_time) values (1,'08:00','17:00')"); // Mondays 08-17 SAST
+  await c.query("insert into availability_rules(weekday,start_time,end_time) values (1,'08:00','17:00') on conflict do nothing"); // Mondays 08-17 SAST (a test may seed twice: identical windows would now overlap, 0027)
   return { psy, t, ua, ub, pa, pb };
 }
 const book = async (c: Client, p: string, t: string, at = T0, status = "confirmed") =>

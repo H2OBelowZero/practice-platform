@@ -332,8 +332,8 @@ it("notifications_outbox is service-role only", () => withClient(async (c) => {
 it("retention_policies are psychologist-only", () => withClient(async (c) => {
   const { psy, adm, bk, u1, p1 } = await seed(c);
   const g = await guardian(c, p1, '{"forms":true}');
-  await asUser(c, psy, () => c.query("insert into retention_policies(record_type,retain_years) values ('clinical_notes',6)"));
-  expect(await count(c, psy, "retention_policies")).toBe(1);
+  await asUser(c, psy, () => c.query("insert into retention_policies(record_type,retain_years) values ('test_records',6)"));
+  expect(await count(c, psy, "retention_policies")).toBe(6); // the five default rows of 0027 plus this one
   for (const u of [adm, bk, u1, g]) {
     expect(await count(c, u, "retention_policies"), "read").toBe(0);
     await expect(asUser(c, u, () => c.query("insert into retention_policies(record_type) values ('x')"))).rejects.toThrow(/row-level security/);
