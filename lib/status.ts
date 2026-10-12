@@ -29,6 +29,10 @@ export const STATUS = {
   rejected: { label: "Rejected", tone: "danger", icon: "x" },
   succeeded: { label: "Succeeded", tone: "success", icon: "check" },
   failed: { label: "Failed", tone: "danger", icon: "alert" },
+  // medical aid membership dates
+  current: { label: "Current", tone: "success", icon: "check" },
+  expired: { label: "Expired", tone: "neutral", icon: "clock" },
+  upcoming: { label: "Not started", tone: "info", icon: "clock" },
   // forms, notes, tasks
   returned: { label: "Returned", tone: "warning", icon: "alert" },
   signed: { label: "Signed", tone: "success", icon: "check" },

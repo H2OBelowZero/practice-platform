@@ -8,6 +8,8 @@ export const NOTICE_TEXT = {
   restored: "The patient has been restored.",
   invited: "The invitation has been queued. The patient will get an email with a link to register.",
   form_requested: "The form has been requested. It now shows in the patient's Documents.",
+  member_added: "The medical aid member has been added.",
+  member_saved: "The medical aid member has been updated.",
   form_returned: "The form has been returned to the patient with your note.",
 } as const;
 export type PatientNoticeCode = keyof typeof NOTICE_TEXT;
