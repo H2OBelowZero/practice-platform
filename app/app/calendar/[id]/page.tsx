@@ -7,6 +7,7 @@ import { noticeText } from "@/lib/appointments/notices";
 import { calendarHref } from "@/lib/calendar/range";
 import { durationLabel, formatLabel } from "@/lib/booking/labels";
 import { formatZar } from "@/lib/money";
+import { taskLink } from "@/lib/tasks/links";
 import { getPractice } from "@/lib/practice";
 import { supabaseServer } from "@/lib/supabase/server";
 import { sastDate, sastDateLabel, sastTime } from "@/lib/time";
@@ -63,6 +64,11 @@ export default async function StaffAppointmentPage({ params, searchParams }: { p
     ? await sb.from("clinical_notes").select("id").eq("appointment_id", appt.id).order("created_at").limit(1)
     : { data: null };
   const noteId = noteRows?.[0]?.id as string | undefined;
+  // a cancelled appointment with an open late-cancellation fee task (made by cancel_appointment): the way to invoice the fee
+  const { data: feeTask } = st === "cancelled"
+    ? await sb.from("tasks").select("id, source, patient_id, appointment_id").eq("source", "late_cancel_fee").eq("status", "open").eq("appointment_id", appt.id).maybeSingle()
+    : { data: null };
+  const feeLink = feeTask ? taskLink(feeTask as { id: string; source: string; patient_id: string | null; appointment_id: string | null }) : null;
 
   return (
     <>
@@ -163,7 +169,15 @@ export default async function StaffAppointmentPage({ params, searchParams }: { p
           </Card>
         )}
 
-        {(st === "no_show" || st === "cancelled") && <p className="text-ink-muted">No further actions: this appointment is {st === "no_show" ? "recorded as a no-show" : "cancelled"}.</p>}
+        {feeLink && (
+          <Card className="mb-4">
+            <h3 className="mb-2 text-lg">Late cancellation fee</h3>
+            <p className="mb-4 text-ink-muted">This cancellation was marked to charge the late cancellation fee. Create the invoice to settle it; the task is closed when you do.</p>
+            <LinkButton href={feeLink.href}>Create fee invoice</LinkButton>
+          </Card>
+        )}
+
+        {(st === "no_show" || (st === "cancelled" && !feeLink)) && <p className="text-ink-muted">No further actions: this appointment is {st === "no_show" ? "recorded as a no-show" : "cancelled"}.</p>}
       </section>
 
       <section aria-labelledby="history-h">

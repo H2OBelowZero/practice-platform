@@ -29,6 +29,7 @@ test.describe("staff billing", () => {
 
     await page.goto(invoiceUrl);
     await page.getByRole("button", { name: "Issue invoice" }).click();
+    await page.getByRole("group", { name: /^Issue invoice/ }).getByRole("button", { name: "Yes, issue this invoice" }).click(); // inline confirmation
     await page.waitForURL(/notice=issued/);
     await expect(page.getByText("Issued", { exact: true }).first()).toBeVisible();
 
@@ -77,5 +78,24 @@ test.describe("bookkeeper billing is read-only", () => {
     expect(await page.locator('a[href^="/app/patients/"]').count()).toBe(0);
     const res = await page.goto(`/app/billing/new?appointment=${APPT ?? "00000000-0000-4000-8000-000000000000"}`);
     expect(res?.status()).toBe(404);
+  });
+});
+
+//   E2E_FEE_TASK_ID   id of an OPEN late_cancel_fee task (a cancelled appointment whose fee was charged)
+const FEE_TASK = process.env.E2E_FEE_TASK_ID;
+test.describe("late cancellation fee invoice", () => {
+  test.skip(!STAFF || !FEE_TASK, "set E2E_STAFF_STATE and E2E_FEE_TASK_ID");
+  test.use({ storageState: STAFF });
+
+  test("the waiting fee is listed on Billing, opens the task form, and a second submit lands on the same invoice", async ({ page }) => {
+    await page.goto("/app/billing");
+    await expect(page.getByRole("heading", { name: "Fees waiting to be invoiced" })).toBeVisible();
+    await page.goto(`/app/billing/new?task=${FEE_TASK}`);
+    await expect(page.getByLabel("Description")).toHaveValue(/^Late cancellation fee — /);
+    await page.getByRole("button", { name: "Create draft invoice" }).click();
+    await page.waitForURL(/\/app\/billing\/[0-9a-f-]{36}\?notice=created/);
+    // the task is closed: opening the form again goes to the invoice
+    await page.goto(`/app/billing/new?task=${FEE_TASK}`);
+    await page.waitForURL(/notice=exists/);
   });
 });

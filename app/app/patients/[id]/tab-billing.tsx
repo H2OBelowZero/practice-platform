@@ -1,10 +1,12 @@
 import Link from "next/link";
+import { FEE_TASK_SELECT, feeTaskItems, type FeeTaskRow } from "@/lib/billing/fee-tasks";
 import { isOverdue, PAYER_LABEL } from "@/lib/billing/list";
 import { formatZar } from "@/lib/money";
 import { sastDayShort } from "@/lib/time";
 import { LinkButton } from "@/components/ui/button";
 import { Notice } from "@/components/ui/notice";
 import { StatusChip } from "@/components/ui/status-chip";
+import { FeeTasksList } from "../../billing/fee-tasks";
 import type { TabContext } from "./tabs";
 
 type Row = { id: string; number: string; status: string; payer_type: string; issue_date: string; due_date: string; total_cents: number; outstanding_cents: number };
@@ -16,12 +18,17 @@ export async function BillingTab({ patient, sb, today }: TabContext) {
     .eq("patient_id", patient.id).order("created_at", { ascending: false }).limit(200);
   if (error) return <Notice tone="error">We could not load the invoices for this patient. Please refresh the page.</Notice>;
   const rows = (data ?? []) as Row[];
-  const owed = rows.reduce((s, r) => s + r.outstanding_cents, 0);
+  // exact totals for this patient from the database (not a sum over the limited list below)
+  const totals = await sb.rpc("billing_totals", { p_patient: patient.id, p_today: today });
+  const owed = totals.error ? null : Number((totals.data as { outstanding_cents: number }[] | null)?.[0]?.outstanding_cents ?? 0);
+  const { data: feeData } = await sb.from("tasks").select(FEE_TASK_SELECT).eq("source", "late_cancel_fee").eq("status", "open").eq("patient_id", patient.id);
+  const fees = feeTaskItems((feeData ?? []) as unknown as FeeTaskRow[]);
 
   return (
     <div className="grid gap-6">
+      <FeeTasksList items={fees} headingId="fees-h" />
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-2xl text-ink-muted">Outstanding on open invoices: <strong className="text-ink">{formatZar(owed)}</strong>.</p>
+        <p className="max-w-2xl text-ink-muted">Outstanding on open invoices: <strong className="text-ink">{owed === null ? "could not be worked out" : formatZar(owed)}</strong>.{rows.length >= 200 ? " Showing the latest 200 invoices." : ""}</p>
         <LinkButton href={`/app/billing/new?patient=${patient.id}`}>New invoice</LinkButton>
       </div>
       {rows.length === 0 ? <Notice tone="info">No invoices have been made for this patient yet.</Notice> : (

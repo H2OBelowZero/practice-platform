@@ -8,7 +8,7 @@ describe("billing database errors in plain language", () => {
     ['duplicate key value violates unique constraint "invoices_one_live_per_appointment"', "appointment_has_invoice"],
     ["appointment_not_billable", "appointment_not_billable"], ["appointment_patient_mismatch", "appointment_patient_mismatch"], ["unknown_appointment", "unknown_appointment"],
     ["task_not_open", "task_not_open"], ["zero_total", "zero_total"], ["portions_mismatch", "portions_mismatch"], ["self_pay_has_scheme_portion", "self_pay_has_scheme_portion"],
-    ["totals_mismatch", "totals_mismatch"], ["lines_required", "lines_required"], ["invalid_line", "invalid_line"], ["invoice_not_draft", "invoice_not_draft"],
+    ["totals_mismatch", "totals_mismatch"], ["lines_mismatch", "lines_mismatch"], ["lines_required", "lines_required"], ["invalid_line", "invalid_line"], ["invoice_not_draft", "invoice_not_draft"],
     ["invoice_frozen", "invoice_frozen"], ["invoice_lines_frozen", "invoice_lines_frozen"], ["invoice_void_is_final", "invoice_void_is_final"],
     ["invalid_invoice_transition", "invalid_invoice_transition"], ["invoice_has_payments", "invoice_has_payments"], ["invoice_has_open_claims", "invoice_has_open_claims"],
     ["invoice_not_payable", "invoice_not_payable"], ["invoice_not_creditable", "invoice_not_creditable"], ["overpay", "overpay"],
@@ -39,7 +39,7 @@ describe("billing database errors in plain language", () => {
 
   it("every exception the billing SQL can raise is mapped (so none shows as 'something went wrong' by accident)", () => {
     const dir = join(__dirname, "..", "..", "supabase", "migrations");
-    const sql = ["0005_billing.sql", "0015_invoice_per_appointment.sql"].map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
+    const sql = ["0005_billing.sql", "0015_invoice_per_appointment.sql", "0016_billing_fixes.sql"].map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
     const raised = [...new Set([...sql.matchAll(/raise exception '([a-z_0-9]+)'/g)].map((m) => m[1]))];
     // codes the billing UI never triggers from a staff session (claims, remittance, ledger internals) are listed here on purpose
     const NOT_FROM_THESE_SCREENS = new Set([

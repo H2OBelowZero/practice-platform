@@ -26,6 +26,7 @@ export function PaymentForm({ action, invoiceId, outstandingCents, today }: {
   }, null);
   const [withdrawnFor, setWithdrawnFor] = useState<PayState>(null);
   const armed = !!state?.duplicate && withdrawnFor !== state;
+  const fe = (id: string) => (state?.field === id && !armed ? state.error : undefined);
 
   return (
     <form
@@ -35,13 +36,13 @@ export function PaymentForm({ action, invoiceId, outstandingCents, today }: {
       <FormError message={armed ? null : state?.error} state={state} />
       {armed && <Notice tone="warning" title="This looks like a repeat">{state?.error} If this is a genuine second payment of the same amount, record it anyway.</Notice>}
       <div className="grid gap-x-4 sm:grid-cols-2">
-        <Select id="method" label="Method" required value={method} onChange={(e) => setMethod(e.target.value)}>
+        <Select id="method" label="Method" required error={fe("method")} value={method} onChange={(e) => setMethod(e.target.value)}>
           <option value="eft">EFT</option><option value="cash">Cash</option><option value="card_machine">Card machine</option>
         </Select>
-        <Input id="amount" label="Amount received (rand)" required inputMode="decimal" placeholder="950,00" hint={`Still owed: ${formatZar(outstandingCents)}.`} />
+        <Input id="amount" label="Amount received (rand)" required inputMode="decimal" placeholder="950,00" hint={`Still owed: ${formatZar(outstandingCents)}.`} error={fe("amount")} />
         <Input id="reference" label={method === "cash" ? "Receipt number (optional)" : method === "eft" ? "Bank reference" : "Card slip number"}
-               required={method !== "cash"} maxLength={100} />
-        <Input id="receivedOn" label="Date received" type="date" required max={today} defaultValue={today} />
+               required={method !== "cash"} maxLength={100} error={fe("reference")} />
+        <Input id="receivedOn" label="Date received" type="date" required max={today} defaultValue={today} error={fe("receivedOn")} />
       </div>
       {armed && <input type="hidden" name="allowDuplicate" value="true" />}
       <Button type="submit" loading={pending}>{pending ? "Recording…" : armed ? "Record anyway" : "Record payment"}</Button>

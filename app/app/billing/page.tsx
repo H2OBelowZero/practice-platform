@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/session";
+import { FEE_TASK_SELECT, feeTaskItems, type FeeTaskRow } from "@/lib/billing/fee-tasks";
 import { isOverdue, PAYER_FILTERS, PAYER_LABEL, parseOverdueFilter, parsePayerFilter, parseStatusFilter, STATUS_FILTERS } from "@/lib/billing/list";
 import { billingNotice } from "@/lib/billing/notices";
 import { formatZar } from "@/lib/money";
@@ -15,6 +16,7 @@ import { Notice } from "@/components/ui/notice";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pager } from "@/components/ui/pager";
 import { StatusChip } from "@/components/ui/status-chip";
+import { FeeTasksList } from "./fee-tasks";
 
 export const metadata = { title: "Billing" };
 
@@ -64,17 +66,22 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
   const ageing = ageingRes.error ? null : ageingSummary(
     ((ageingRes.data ?? []) as { due_date: string; n: number; outstanding_cents: number }[]).map((r) => ({ dueDate: r.due_date, n: Number(r.n), outstandingCents: Number(r.outstanding_cents) })), today);
 
+  // open late-cancellation fee tasks (psychologist and admin only: the bookkeeper cannot read tasks)
+  const feeRows = names ? ((await sb.from("tasks").select(FEE_TASK_SELECT).eq("source", "late_cancel_fee").eq("status", "open").order("created_at").limit(20)).data ?? []) as unknown as FeeTaskRow[] : [];
   const nameOf = new Map<string, string>();
-  if (names && rows.length) {
-    const { data: ps } = await sb.from("patients").select("id, first_name, last_name").in("id", [...new Set(rows.map((r) => r.patient_id))]);
+  const nameIds = [...new Set([...rows.map((r) => r.patient_id), ...feeRows.map((f) => f.patient_id).filter((x): x is string => !!x)])];
+  if (names && nameIds.length) {
+    const { data: ps } = await sb.from("patients").select("id, first_name, last_name").in("id", nameIds);
     for (const p of ps ?? []) nameOf.set(p.id as string, `${p.first_name} ${p.last_name}`);
   }
+  const fees = feeTaskItems(feeRows, nameOf);
   const filtered = q !== "" || status !== "" || payer !== "" || overdue;
 
   return (
     <>
       <PageHeader title="Billing" description={names ? "Invoices, payments and what is still owed. To invoice a session, use the Create invoice button on the attended appointment, or the patient's Billing tab." : "Invoices, payments and what is still owed."} />
       {notice && <Notice tone="success">{notice}</Notice>}
+      <FeeTasksList items={fees} headingId="fees-h" />
 
       <section aria-labelledby="totals-h" className="mb-8">
         <h2 id="totals-h" className="sr-only">Totals for the invoices listed</h2>

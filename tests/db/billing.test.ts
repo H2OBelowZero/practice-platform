@@ -59,7 +59,7 @@ it("setup insert order from the brief works for the owner: issued invoice, porti
 
 // ---- invoice lifecycle ---------------------------------------------------------------------------------------------
 const draft = async (c: Client, u: string, p: string) =>
-  (await as(c, u, "insert into invoices(patient_id,total_cents,patient_portion_cents) values ($1,100000,100000) returning id", [p])).rows[0].id as string;
+  (await as(c, u, "insert into invoices(patient_id,subtotal_cents,total_cents,patient_portion_cents) values ($1,100000,100000,100000) returning id", [p])).rows[0].id as string;
 
 it("staff create invoices as draft; any other starting status is rejected", () => withClient(async (c) => {
   const { psy, adm, p1 } = await seed(c);
@@ -157,8 +157,8 @@ it("invoice lines: editable on a draft, frozen (insert/update/delete) once the i
   const { psy, p1 } = await seed(c);
   const id = await draft(c, psy, p1);
   const l = (await as(c, psy, "insert into invoice_lines(invoice_id,description,quantity,unit_cents) values ($1,'Session',1,100000) returning id", [id])).rows[0].id;
-  await as(c, psy, "update invoice_lines set quantity=2 where id=$1", [l]);
-  await as(c, psy, "update invoices set total_cents=100000 where id=$1", [id]);
+  await as(c, psy, "update invoice_lines set description='Session (edited)' where id=$1", [l]);
+  await as(c, psy, "update invoices set subtotal_cents=100000, total_cents=100000 where id=$1", [id]);
   const l2 = (await as(c, psy, "insert into invoice_lines(invoice_id,description,unit_cents) values ($1,'Tmp',5) returning id", [id])).rows[0].id;
   expect((await as(c, psy, "delete from invoice_lines where id=$1", [l2])).rowCount).toBe(1);
   await as(c, psy, "update invoices set status='issued' where id=$1", [id]);
@@ -192,7 +192,7 @@ it("invoices / invoice_lines read matrix: patients and current guardians see iss
   const { psy, adm, bk, assoc, u1, u2, p1, g, gOld } = await seed(c);
   const withLine = async () => {
     const d = await draft(c, psy, p1);
-    await c.query("insert into invoice_lines(invoice_id,description,unit_cents) values ($1,'x',1)", [d]);
+    await c.query("insert into invoice_lines(invoice_id,description,unit_cents) values ($1,'x',100000)", [d]);
     return d;
   };
   const issued = await withLine();
@@ -211,7 +211,7 @@ it("invoices / invoice_lines read matrix: patients and current guardians see iss
 it("guardians need permissions.pay to see invoices, lines, payments, credit notes and the member card", () => withClient(async (c) => {
   const { psy, p1 } = await seed(c);
   const d = await draft(c, psy, p1);
-  await c.query("insert into invoice_lines(invoice_id,description,unit_cents) values ($1,'x',1)", [d]);
+  await c.query("insert into invoice_lines(invoice_id,description,unit_cents) values ($1,'x',100000)", [d]);
   await as(c, psy, "update invoices set status='issued' where id=$1", [d]);
   await pay(c, psy, d, "eft", 1000);
   await as(c, psy, "insert into credit_notes(invoice_id,amount_cents,reason) values ($1,100,'r')", [d]);

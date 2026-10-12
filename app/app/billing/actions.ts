@@ -7,6 +7,7 @@ import { requireRole } from "@/lib/auth/session";
 import type { ActionState, Values } from "@/lib/appointments/types";
 import { safely } from "@/lib/appointments/followups";
 import { BILLING_ERROR, billingErrorCode, billingErrorText } from "@/lib/billing/errors";
+import { shouldShowExistingInvoice } from "@/lib/billing/fee-tasks";
 import { billingRecipient, queueBillingEmail } from "@/lib/billing/followups";
 import { buildInvoice, parseCreditNoteForm, parseInvoiceForm, parsePaymentForm, uuid } from "@/lib/billing/input";
 import { loadOutstanding } from "@/lib/billing/outstanding";
@@ -29,8 +30,9 @@ async function figures(values: Values) {
   const parsed = parseInvoiceForm(values, sastDate(new Date()));
   if (!parsed.ok) return parsed;
   const practice = await getBillingPractice();
-  if (!practice) return { ok: false as const, error: BILLING_ERROR.generic };
-  return buildInvoice(parsed.value, { registered: practice.vat_registered, rate: practice.vat_rate });
+  if (!practice) return { ok: false as const, error: BILLING_ERROR.generic, field: undefined };
+  const built = buildInvoice(parsed.value, { registered: practice.vat_registered, rate: practice.vat_rate });
+  return built.ok ? { ok: true as const, value: built.value, input: parsed.value } : built;
 }
 
 /**
@@ -43,17 +45,17 @@ export async function createInvoice(rawCtx: unknown, values: Values): Promise<Ac
   const ctx = createCtx.safeParse(rawCtx);
   if (!ctx.success) return generic;
   const built = await figures(values);
-  if (!built.ok) return { error: built.error };
+  if (!built.ok) return { error: built.error, field: built.field };
   const b = built.value;
 
   const sb = await supabaseServer();
   const { data, error } = await sb.rpc("create_invoice_draft", {
     p_patient: ctx.data.patientId, p_appointment: ctx.data.appointmentId ?? null, p_task: ctx.data.taskId ?? null,
-    p_due: values.dueDate.trim(), p_payer: values.payer,
+    p_due: built.input.dueDate, p_payer: built.input.payer,
     p_subtotal: b.subtotal, p_discount: b.discount, p_vat: b.vat, p_total: b.total, p_scheme: b.scheme, p_patient_portion: b.patientPortion, p_lines: b.lines,
   });
   if (error || typeof data !== "string") {
-    if (billingErrorCode(error?.message) === "appointment_has_invoice" && ctx.data.appointmentId) {
+    if (shouldShowExistingInvoice(billingErrorCode(error?.message), !!ctx.data.appointmentId) && ctx.data.appointmentId) {
       const { data: live } = await sb.from("invoices").select("id").eq("appointment_id", ctx.data.appointmentId).neq("status", "void").maybeSingle();
       if (live?.id) return detail(live.id as string, "exists");
     }
@@ -69,12 +71,12 @@ export async function saveDraft(rawId: unknown, values: Values): Promise<ActionS
   const id = uuid.safeParse(rawId);
   if (!id.success) return generic;
   const built = await figures(values);
-  if (!built.ok) return { error: built.error };
+  if (!built.ok) return { error: built.error, field: built.field };
   const b = built.value;
 
   const sb = await supabaseServer();
   const { error } = await sb.rpc("save_invoice_draft", {
-    p_invoice: id.data, p_due: values.dueDate.trim(), p_payer: values.payer,
+    p_invoice: id.data, p_due: built.input.dueDate, p_payer: built.input.payer,
     p_subtotal: b.subtotal, p_discount: b.discount, p_vat: b.vat, p_total: b.total, p_scheme: b.scheme, p_patient_portion: b.patientPortion, p_lines: b.lines,
   });
   if (error) return { error: billingErrorText(error.message) };
@@ -83,7 +85,8 @@ export async function saveDraft(rawId: unknown, values: Values): Promise<ActionS
 }
 
 /** draft -> issued. The database checks the portions and the total, stamps issue_date and audits it; then the patient is emailed a link. */
-export async function issueInvoice(rawId: unknown): Promise<ActionState> {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function issueInvoice(rawId: unknown, _values?: Values): Promise<ActionState> { // _values: submitted by the confirmation form, unused
   await requireRole([...WRITERS]);
   const id = uuid.safeParse(rawId);
   if (!id.success) return generic;
@@ -121,14 +124,14 @@ export async function recordPayment(rawId: unknown, values: Values): Promise<Pay
   const id = uuid.safeParse(rawId);
   if (!id.success) return generic;
   const p = parsePaymentForm(values, sastDate(new Date()));
-  if (!p.ok) return { error: p.error };
+  if (!p.ok) return { error: p.error, field: p.field };
 
   const sb = await supabaseServer();
   const bal = await loadOutstanding(sb, id.data).catch(() => undefined);
   if (bal === undefined) return generic;
   if (!bal) return { error: BILLING_ERROR.unknown_invoice };
   if (bal.status !== "issued" && bal.status !== "part_paid") return { error: BILLING_ERROR.invoice_not_payable };
-  if (p.value.amountCents > bal.outstandingCents) return { error: `That is more than the invoice still owes (${formatZar(bal.outstandingCents)}).` };
+  if (p.value.amountCents > bal.outstandingCents) return { error: `That is more than the invoice still owes (${formatZar(bal.outstandingCents)}).`, field: "amount" };
 
   const { error } = await sb.rpc("record_payment", {
     p_invoice: id.data, p_method: p.value.method, p_amount: p.value.amountCents, p_ref: p.value.reference, p_by: null,
@@ -151,14 +154,14 @@ export async function addCreditNote(rawId: unknown, values: Values): Promise<Act
   const id = uuid.safeParse(rawId);
   if (!id.success) return generic;
   const c = parseCreditNoteForm(values);
-  if (!c.ok) return { error: c.error };
+  if (!c.ok) return { error: c.error, field: c.field };
 
   const sb = await supabaseServer();
   const bal = await loadOutstanding(sb, id.data).catch(() => undefined);
   if (bal === undefined) return generic;
   if (!bal) return { error: BILLING_ERROR.unknown_invoice };
   if (bal.status !== "issued" && bal.status !== "part_paid") return { error: BILLING_ERROR.invoice_not_creditable };
-  if (c.value.amountCents > bal.outstandingCents) return { error: `A credit note cannot be more than what is still owed (${formatZar(bal.outstandingCents)}).` };
+  if (c.value.amountCents > bal.outstandingCents) return { error: `A credit note cannot be more than what is still owed (${formatZar(bal.outstandingCents)}).`, field: "amount" };
 
   const { error } = await sb.from("credit_notes").insert({ invoice_id: id.data, amount_cents: c.value.amountCents, reason: c.value.reason });
   if (error) return { error: billingErrorText(error.message) };
