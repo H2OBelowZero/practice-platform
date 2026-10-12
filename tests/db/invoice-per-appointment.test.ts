@@ -42,6 +42,16 @@ describe("create_invoice_draft", () => {
     await expect(draft(c, psy, { patient: p1, appt: a })).rejects.toThrow(/invoices_one_live_per_appointment/);
   }));
 
+  it("lines keep the order they were sent in (position), also after a save", () => withClient(async (c) => {
+    const { psy, p1 } = await base(c);
+    const three = JSON.stringify([{ description: "Z first", quantity: 1, unit_cents: 100 }, { description: "A second", quantity: 1, unit_cents: 100 }, { description: "M third", quantity: 1, unit_cents: 100 }]);
+    const id = await draft(c, psy, { patient: p1, lines: three, subtotal: 300, total: 300, pp: 300 });
+    const order = async () => (await c.query("select description, position from invoice_lines where invoice_id=$1 order by position", [id])).rows;
+    expect(await order()).toEqual([{ description: "Z first", position: 1 }, { description: "A second", position: 2 }, { description: "M third", position: 3 }]);
+    await as(c, psy, "select save_invoice_draft($1,'2030-03-01','self',300,0,0,300,0,300,$2::jsonb)", [id, JSON.stringify(JSON.parse(three).reverse())]);
+    expect((await order()).map((r) => r.description)).toEqual(["M third", "A second", "Z first"]);
+  }));
+
   it("admin may create too; bookkeeper, patient and guardian may not", () => withClient(async (c) => {
     const { adm, bk, u1, g, p1 } = await base(c);
     await draft(c, adm, { patient: p1 });

@@ -375,7 +375,7 @@ describe("anon", () => {
   it("sees 0 rows of, or is denied on, every other table and view; the allow-listed tables are read-only", () => withClient(async (c) => {
     await world(c); // every table has data, so a leak shows up as rows
     for (const t of [...(await publicTables(c, ["r", "v", "m", "p"]))]) {
-      const kind = t === "claim_summary" ? "view" : "table";
+      const kind = t === "claim_summary" || t === "invoice_balances" ? "view" : "table";
       const res = await attempt(asAnon(c, () => c.query(`select * from public."${t}"`)));
       if (t in ANON_READABLE) expect(res, `anon ${t}`).toBeGreaterThan(0);
       else expect([0, `permission denied for ${kind} ${t}`], `anon ${t}`).toContain(res);

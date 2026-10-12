@@ -12,6 +12,9 @@
 
 create unique index invoices_one_live_per_appointment on invoices (appointment_id) where appointment_id is not null and status <> 'void';
 
+-- lines keep the order they were typed in (set by _insert_invoice_lines; existing rows all have 0)
+alter table invoice_lines add column position int not null default 0;
+
 -- ---- balances -------------------------------------------------------------------------------------------------------------
 -- outstanding only exists for an invoice that can still be paid (issued / part_paid); draft, paid and void owe nothing.
 create view invoice_balances with (security_invoker = true) as
@@ -70,8 +73,8 @@ begin
              where x.description is null or btrim(x.description) = '' or length(x.description) > 200
                 or x.quantity is null or x.quantity not between 1 and 99 or x.unit_cents is null or x.unit_cents < 0) then
     raise exception 'invalid_line'; end if;
-  insert into invoice_lines(invoice_id, description, quantity, unit_cents)
-  select p_invoice, btrim(x.description), x.quantity, x.unit_cents from jsonb_to_recordset(p_lines) as x(description text, quantity int, unit_cents int);
+  insert into invoice_lines(invoice_id, description, quantity, unit_cents, position)
+  select p_invoice, btrim(e.o ->> 'description'), (e.o ->> 'quantity')::int, (e.o ->> 'unit_cents')::int, e.n::int from jsonb_array_elements(p_lines) with ordinality as e(o, n);
 end $$;
 
 -- A new DRAFT invoice with its lines. From an appointment: the appointment must be the patient's and attended (or cancelled with the
