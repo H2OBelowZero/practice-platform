@@ -69,3 +69,14 @@ it("a view created later also starts without TRUNCATE/TRIGGER/REFERENCES (defaul
   expect(await offenders(c)).toEqual([]);
   expect((await c.query("select has_table_privilege('authenticated', 'zz_future_view', 'SELECT') as ok")).rows[0].ok).toBe(true);
 }));
+
+it("the verification query in the README is valid and returns no rows (so the owner can trust it after deploy)", () => withClient(async (c) => {
+  const { readFileSync } = await import("node:fs");
+  const readme = readFileSync("README.md", "utf8");
+  const sql = /```sql\n(\s*-- tables, views[\s\S]*?)```/.exec(readme)?.[1];
+  expect(sql, "README verification query not found").toBeTruthy();
+  expect((await c.query(sql!)).rows).toEqual([]);
+  await c.query("create table zz_bad (id int)");
+  await c.query("grant truncate on zz_bad to authenticated");
+  expect((await c.query(sql!)).rows.map((r) => `${r.relname}:${r.rolname}:${r.priv}`)).toEqual(["zz_bad:authenticated:TRUNCATE"]);
+}));
