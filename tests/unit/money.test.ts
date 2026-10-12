@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatZar, parseZarToCents } from "@/lib/money";
+import { formatZar, formatZarInput, parseZarToCents } from "@/lib/money";
 
 describe("formatZar", () => {
   it.each([
@@ -24,5 +24,13 @@ describe("parseZarToCents", () => {
   ])("rejects %j", (s) => expect(parseZarToCents(s)).toBeNull());
   it("round-trips formatZar output", () => {
     for (const c of [0, 5, 99, 100, 123450, 100000000]) expect(parseZarToCents(formatZar(c))).toBe(c);
+  });
+});
+
+describe("formatZarInput", () => {
+  it("is a plain edit-box amount that parses back to the same cents", () => {
+    for (const c of [0, 5, 99, 100, 95000, 123450, 100000000, 2147483647]) expect(parseZarToCents(formatZarInput(c))).toBe(c);
+    expect(formatZarInput(95000)).toBe("950,00");
+    expect(formatZarInput(5)).toBe("0,05");
   });
 });

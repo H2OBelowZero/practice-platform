@@ -22,3 +22,8 @@ export function parseZarToCents(input: string): number | null {
   const cents = rand * 100 + (m[2] ? Number(m[2].padEnd(2, "0")) : 0);
   return Number.isSafeInteger(cents) && cents <= MAX_CENTS ? cents : null;
 }
+
+/** Cents as the plain text a person edits in an amount box: 95000 -> "950,00" (round-trips through parseZarToCents). */
+export function formatZarInput(cents: number): string {
+  return `${Math.floor(cents / 100)},${String(cents % 100).padStart(2, "0")}`;
+}

@@ -54,3 +54,11 @@ it("the email link goes to the portal payments page, or via registration when th
   expect(billingLink("https://app.example.com", true)).toBe("https://app.example.com/portal/payments");
   expect(billingLink("https://app.example.com", false)).toBe("https://app.example.com/register?next=/portal/payments");
 });
+
+import { invoiceAuditFilter, invoiceEventText } from "@/lib/billing/list";
+it("invoice history wording and filter", () => {
+  expect(invoiceEventText("payment.record")).toBe("Payment recorded");
+  expect(invoiceEventText("something.new_thing")).toBe("Something new thing");
+  expect(invoiceAuditFilter("11111111-2222-4333-8444-555555555555")).toBe(
+    "and(entity.eq.invoices,entity_id.eq.11111111-2222-4333-8444-555555555555),and(entity.in.(payments,credit_notes),detail->>invoice_id.eq.11111111-2222-4333-8444-555555555555)");
+});
