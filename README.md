@@ -208,3 +208,15 @@ curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://YOUR-APP/api/cron/remi
 ```
 
 Not verified without a live setup: a real provider call, the Vercel schedule itself, and the SQL against a real Supabase project (the DB tests run on plain Postgres).
+
+## Staff dashboard, tasks and audit viewer
+
+- `/app` (psychologist, admin; a bookkeeper is sent to Billing, anyone else gets a 404) reads every number through the signed-in user's own RLS client, in
+  parallel, with counts and SQL aggregates (`billing_open_by_due_date`, `dashboard_payments_by_method`, migration 0024). A failed query shows a quiet note in
+  its own tile or section. The admin gets the same operational tiles and no notes tile.
+- `/app/tasks` (psychologist, admin): filters by status, priority, due date and kind (`lib/tasks/groups.ts` classifies the task sources), create / edit /
+  complete / reopen (audited `task.create`, `task.update`, `task.complete`, `task.reopen`: ids and field names only). Clinical-risk tasks exist only for the psychologist (RLS).
+- `/app/audit` (psychologist only): filters, 50 per page, whitelisted detail (`lib/audit-viewer/detail.ts`), CSV at `/app/audit/export` (max 5000 rows, formulas
+  neutralised by `lib/reports/csv.ts`). Viewing writes `audit.view` and exporting writes `export.audit`; both fail closed. A 5 000 row export is read in pages of
+  1 000 because the API caps a response.
+- Reports and Settings are hidden in the navigation until Task 16b adds their pages (`ready: false` in `lib/nav.ts`).
