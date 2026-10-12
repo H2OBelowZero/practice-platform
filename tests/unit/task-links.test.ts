@@ -24,6 +24,11 @@ describe("taskLink", () => {
     expect(taskLink({ id: T, source: "claim_rejected", patient_id: P, meta: { claim_id: "../../x" } })?.href).toBe(`/app/patients/${P}?tab=billing`);
     expect(taskLink({ id: T, source: "claim_rejected", patient_id: null, meta: { claim_id: "x" } })).toBeNull();
   });
+  it("overdue_invoice opens the invoice (meta, else the id in the source), else the billing tab", () => {
+    expect(taskLink({ id: T, source: `overdue_invoice:${I}`, patient_id: P, meta: { invoice_id: I } })).toEqual({ href: `/app/billing/${I}`, label: "Open invoice" });
+    expect(taskLink({ id: T, source: `overdue_invoice:${I}`, patient_id: P })?.href).toBe(`/app/billing/${I}`);
+    expect(taskLink({ id: T, source: "overdue_invoice:../x", patient_id: P, meta: null })?.href).toBe(`/app/patients/${P}?tab=billing`);
+  });
   it("risk_flag opens the note", () => {
     expect(taskLink({ id: T, source: `risk_flag:${N}`, patient_id: P })).toEqual({ href: `/app/notes/${N}`, label: "Open note" });
     expect(taskLink({ id: T, source: "risk_flag:not-an-id", patient_id: P })?.href).toBe(`/app/patients/${P}?tab=notes`);

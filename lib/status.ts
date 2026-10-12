@@ -45,6 +45,7 @@ export const STATUS = {
   archived: { label: "Archived", tone: "neutral", icon: "archive" },
   // notification outbox
   pending: { label: "Pending", tone: "neutral", icon: "clock" },
+  sending: { label: "Sending", tone: "info", icon: "send" },
   sent: { label: "Sent", tone: "success", icon: "send" },
 } as const satisfies Record<string, StatusMeta>;
 

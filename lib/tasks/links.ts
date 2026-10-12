@@ -1,6 +1,6 @@
 /**
  * Where a staff task leads. One place for every task source so the tasks page (Task 16), the dashboard and the billing screens agree.
- * Sources: late_cancel_fee, payfast_unreconciled:<pf id>, consent_withdrawn, claim_rejected, duplicate_patient, risk_flag:<note id>.
+ * Sources: late_cancel_fee, payfast_unreconciled:<pf id>, consent_withdrawn, claim_rejected, duplicate_patient, risk_flag:<note id>, overdue_invoice:<invoice id>.
  * Returns null for a source we do not know (the task is shown without a link). Only ids from the database are put in the URL,
  * and only when they look like a uuid, so a bad row can never produce a link to somewhere else.
  */
@@ -25,6 +25,10 @@ export function taskLink(t: TaskLinkInput): TaskLink | null {
     return ok(claim) ? { href: `/app/claims/${claim}`, label: "Open claim" } : patient("billing") && { href: patient("billing")!.href, label: "Open billing" };
   }
   if (src === "duplicate_patient") return patient();
+  if (src.startsWith("overdue_invoice:")) { // 0022: meta.invoice_id, else the id after the colon
+    const inv = t.meta && typeof t.meta === "object" ? (t.meta as { invoice_id?: unknown }).invoice_id : src.slice("overdue_invoice:".length);
+    return ok(inv) ? { href: `/app/billing/${inv}`, label: "Open invoice" } : patient("billing");
+  }
   if (src.startsWith("risk_flag:")) { const note = src.slice("risk_flag:".length); return ok(note) ? { href: `/app/notes/${note}`, label: "Open note" } : patient("notes"); }
   return null;
 }
