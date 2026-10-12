@@ -21,7 +21,7 @@ const appt = async (c: Client, s: Seed, offset: string, status = "confirmed") =>
   (await c.query(
     "insert into appointments(patient_id,session_type_id,starts_at,ends_at,status) values ($1,$2, now() + $3::interval, now() + $3::interval + interval '1 minute', $4) returning id",
     [s.p, s.t, offset, status])).rows[0].id as string;
-const enqueue = async (c: Client) => (await asService(c, () => c.query("select enqueue_reminders() as n"))).rows[0].n as number;
+const enqueue = async (c: Client, sms = false) => (await asService(c, () => c.query("select enqueue_reminders($1) as n", [sms]))).rows[0].n as number;
 const rows = async (c: Client, where = "true") => (await c.query(`select * from notifications_outbox where ${where} order by id`)).rows;
 const mkRow = async (c: Client, o: { status?: string; attempts?: number; sendAfter?: string; claimedAgo?: string | null } = {}) =>
   Number((await c.query(
@@ -86,26 +86,27 @@ describe("enqueue_reminders", () => {
   it("queues an SMS row only when sms is on and a phone is on record; both channels when both are on", () => withClient(async (c) => {
     let s = await seed(c, { prefs: '{"email":false,"sms":true}' });
     const a1 = await appt(c, s, "24 hours");
-    expect(await enqueue(c)).toBe(1);
+    expect(await enqueue(c)).toBe(0); // SMS is switched off by default: no sms rows at all
+    expect(await enqueue(c, true)).toBe(1);
     expect(await rows(c)).toMatchObject([{ channel: "sms", template: "reminder_24h_sms", recipient: "0821234567", dedupe_key: `reminder_24h_sms:${a1}`, status: "pending" }]);
     s = await seed(c, { prefs: '{"email":true,"sms":true}' });
     await appt(c, s, "24 hours 30 minutes");
-    expect(await enqueue(c)).toBe(2);
+    expect(await enqueue(c, true)).toBe(2);
     s = await seed(c, { prefs: '{"email":false,"sms":true}', phone: null });
     await appt(c, s, "23 hours 30 minutes");
-    expect(await enqueue(c)).toBe(0);
+    expect(await enqueue(c, true)).toBe(0);
   }));
 
   it("is idempotent: a second and third run (cron every 15 minutes) insert nothing", () => withClient(async (c) => {
     const s = await seed(c, { prefs: '{"email":true,"sms":true}' });
     await appt(c, s, "24 hours");
-    expect(await enqueue(c)).toBe(2);
-    expect(await enqueue(c)).toBe(0);
-    expect(await enqueue(c)).toBe(0);
+    expect(await enqueue(c, true)).toBe(2);
+    expect(await enqueue(c, true)).toBe(0);
+    expect(await enqueue(c, true)).toBe(0);
     expect((await rows(c)).length).toBe(2);
     // a sent reminder is not queued again either
     await c.query("update notifications_outbox set status='sent', sent_at=now()");
-    expect(await enqueue(c)).toBe(0);
+    expect(await enqueue(c, true)).toBe(0);
   }));
 
   it("the email row: recipient is the trimmed email, payload is date, time and a path only, formatted in SAST", () => withClient(async (c) => {
@@ -320,9 +321,9 @@ describe("enqueue_overdue_tasks", () => {
 });
 
 describe("grants", () => {
-  const FNS = ["claim_outbox(int)", "finish_outbox(bigint,boolean,text)", "enqueue_reminders()", "enqueue_overdue_tasks()", "sast_short_date(timestamptz)"];
+  const FNS = ["claim_outbox(int,text[])", "finish_outbox(bigint,boolean,text)", "release_outbox(bigint)", "enqueue_reminders(boolean)", "enqueue_overdue_tasks()", "sast_short_date(timestamptz)"];
   const CALLS: [string, unknown[]][] = [
-    ["select * from claim_outbox(1)", []], ["select finish_outbox(1,true,null)", []], ["select enqueue_reminders()", []], ["select enqueue_overdue_tasks()", []],
+    ["select * from claim_outbox(1)", []], ["select finish_outbox(1,true,null)", []], ["select release_outbox(1)", []], ["select enqueue_reminders()", []], ["select enqueue_overdue_tasks()", []],
     ["select sast_short_date(now())", []],
   ];
 
@@ -333,7 +334,7 @@ describe("grants", () => {
       expect(r, f).toEqual({ s: true, a: false, n: false });
     }
     const pub = await c.query("select 1 from pg_proc p where p.proname = any($1) and exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where a.grantee = 0)",
-      [["claim_outbox", "finish_outbox", "enqueue_reminders", "enqueue_overdue_tasks", "sast_short_date"]]);
+      [["claim_outbox", "finish_outbox", "release_outbox", "enqueue_reminders", "enqueue_overdue_tasks", "sast_short_date"]]);
     expect(pub.rowCount).toBe(0);
   }));
 

@@ -240,12 +240,12 @@ describe("patient A cannot write patient B's data (or anything staff-only)", () 
   }));
 
   // controls: the same harness does let A change what the spec allows, so the zeros above are policy, not a broken test
-  it("control: A can edit own contact details and own draft submission", () => withClient(async (c) => {
+  it("control: A can edit own language and own draft submission", () => withClient(async (c) => {
     const w = await world(c);
-    expect(await attempt(asUser(c, w.u1, () => c.query("update patients set phone='082' where id=$1", [w.p1])))).toBe(1);
+    expect(await attempt(asUser(c, w.u1, () => c.query("update patients set language='af' where id=$1", [w.p1])))).toBe(1);
     expect(await attempt(asUser(c, w.u1, () => c.query("update form_submissions set answers='{\"x\":1}' where id=$1", [w.a.draft])))).toBe(1);
-    expect((await c.query("select phone from patients where id=$1", [w.p1])).rows[0].phone).toBe("082");
-    expect((await c.query("select phone from patients where id=$1", [w.p2])).rows[0].phone).toBeNull();
+    expect((await c.query("select language from patients where id=$1", [w.p1])).rows[0].language).toBe("af");
+    expect((await c.query("select language from patients where id=$1", [w.p2])).rows[0].language).toBe("en");
     // ...but not the protected columns, even on the own row
     expect(await attempt(asUser(c, w.u1, () => c.query("update patients set status='archived' where id=$1", [w.p1])))).toBe("protected patient columns can only be changed by staff");
   }));

@@ -83,11 +83,11 @@ it("a guardian sees the patient they hold valid guardianship over, and no other"
   expect(seen).toEqual([{ last_name: "Mine" }]);
 }));
 
-it("a patient can edit allowed columns of their own row", () => withClient(async (c) => {
+it("a patient can edit allowed columns of their own row (language and reminder choices; contact details are staff-only since 0023)", () => withClient(async (c) => {
   const { u1 } = await mkPatients(c);
-  const r = await asUser(c, u1, () => c.query("update patients set phone='0821234567', email='a@t.test', language='af' where user_id=$1", [u1]));
+  const r = await asUser(c, u1, () => c.query("update patients set language='af', comms_prefs='{\"email\":false,\"sms\":true}' where user_id=$1", [u1]));
   expect(r.rowCount).toBe(1);
-  expect((await c.query("select phone from patients where user_id=$1", [u1])).rows[0].phone).toBe("0821234567");
+  expect((await c.query("select language, comms_prefs from patients where user_id=$1", [u1])).rows[0]).toEqual({ language: "af", comms_prefs: { email: false, sms: true } });
 }));
 
 it.each([
