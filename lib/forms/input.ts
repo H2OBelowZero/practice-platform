@@ -7,6 +7,8 @@ export const patientIdSchema = z.uuid();
 export const templateIdSchema = z.uuid();
 /** The answers object: shape only (keys and types are checked against the template by validateAnswers / draftAnswers). */
 export const answersSchema = z.record(z.string().max(100), z.unknown());
+/** The `updated_at` the editor last saw (an ISO timestamp as the database returned it). */
+export const seenSchema = z.string().min(10).max(40);
 export const startSchema = z.object({ patientId: patientIdSchema, templateId: templateIdSchema });
 export const withdrawSchema = z.object({ patientId: patientIdSchema, purpose: z.enum(CONSENT_PURPOSES) });
 

@@ -131,7 +131,7 @@ export default async function PortalDocuments({ searchParams }: { searchParams: 
                         <Card className="flex flex-wrap items-center justify-between gap-3">
                           <div>
                             <p className="font-medium">{templateTitle(t)}</p>
-                            {sent.has(t.key) && <p className="text-sm text-ink-muted">You completed this on {sastDateLabel(sent.get(t.key)!)}.</p>}
+                            {sent.has(t.key) && <p className="text-sm text-ink-muted">{p.own ? "You" : p.first_name} completed this on {sastDateLabel(sent.get(t.key)!)}.</p>}
                           </div>
                           <ActionButton action={startForm} args={[p.id, t.id]} submitLabel={<>{sent.has(t.key) ? "Fill in again" : "Start"}<span className="sr-only"> {templateTitle(t)}{showNames ? ` for ${p.own ? "yourself" : p.first_name}` : ""}</span></>} pendingLabel="Opening…" variant="secondary" />
                         </Card>

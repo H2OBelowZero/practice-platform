@@ -6,7 +6,7 @@ import { draftAnswers } from "@/lib/forms/draft";
 import { PURPOSE_INFO, PURPOSE_ORDER, consentFields, consentPurposesFrom, consentView, isPurpose, withdrawalCopy } from "@/lib/forms/consent";
 import { guardianMayUseForms, latestPerKey, templateTitle } from "@/lib/forms/access";
 import { formNotice } from "@/lib/forms/notices";
-import { TEMPLATES } from "@/lib/forms/templates";
+import { RESTRICTED_KEYS, TEMPLATES } from "@/lib/forms/templates";
 import { CONSENT_PURPOSES, checkSchema, type FormSchema } from "@/lib/forms/validate";
 
 const schema: FormSchema = {
@@ -147,6 +147,15 @@ describe("autosave state machine", () => {
     expect(run({ type: "change" }, { type: "change" }, { type: "change" }).rev).toBe(3);
     expect(AUTOSAVE_DELAY_MS).toBe(1500);
   });
+  it("a save refused because the form changed elsewhere stops autosave: conflict, typing keeps the text but never re-arms a save", () => {
+    const c = run({ type: "change" }, { type: "save_start" }, { type: "save_conflict" });
+    expect(c.phase).toBe("conflict");
+    expect(autosaveReducer(c, { type: "change" }).phase).toBe("conflict");
+    expect(autosaveReducer(c, { type: "save_start" })).toBe(c);
+    expect(hasUnsaved(c)).toBe(true);
+    expect(autosaveText(c, (i) => i)).toBe("This form was changed elsewhere. Reload to see the latest answers.");
+    expect(autosaveReducer(initialAutosave, { type: "save_conflict" })).toBe(initialAutosave); // only a save in flight can conflict
+  });
   it("hasUnsaved drives the leave-page warning: dirty, saving and error warn; idle and saved do not", () => {
     expect(hasUnsaved(initialAutosave)).toBe(false);
     expect(hasUnsaved(run({ type: "change" }))).toBe(true);
@@ -258,6 +267,9 @@ describe("access and notices", () => {
 describe("restricted flag", () => {
   it("only the health history is restricted; the schema check accepts a boolean and rejects anything else", () => {
     expect(TEMPLATES.filter((t) => t.schema.restricted).map((t) => t.key)).toEqual(["medical_history"]);
+    // every version of a restricted key carries the flag, and nothing else does (the database also inherits it for later versions)
+    expect([...RESTRICTED_KEYS]).toEqual(["medical_history"]);
+    for (const t of TEMPLATES) expect(t.schema.restricted === true, t.key).toBe(RESTRICTED_KEYS.includes(t.key));
     expect(checkSchema({ restricted: true, fields: [{ key: "a", label: "A", type: "text" }] })).toEqual([]);
     expect(checkSchema({ restricted: "yes", fields: [{ key: "a", label: "A", type: "text" }] })).toEqual(["restricted must be true or false"]);
   });

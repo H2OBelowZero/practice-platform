@@ -56,7 +56,7 @@ export default async function PortalForm({ params }: { params: Promise<{ submiss
           <AnswersView schema={sub.schema} answers={sub.answers} />
         </Card>
       ) : (
-        <FormEditor submissionId={sub.id} schema={sub.schema} initial={draftAnswers(sub.schema, sub.answers)} />
+        <FormEditor submissionId={sub.id} schema={sub.schema} initial={draftAnswers(sub.schema, sub.answers)} updatedAt={sub.updated_at} />
       )}
     </>
   );

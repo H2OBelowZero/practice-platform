@@ -253,7 +253,7 @@ insert into form_templates(key, version, schema) values ('privacy_notice', 1, $t
       "type": "checkbox",
       "required": true,
       "consentPurpose": "privacy_notice",
-      "help": "You can withdraw this consent later from the Documents page of your account."
+      "help": "You can withdraw this consent later from the Privacy page of your account."
     }
   ]
 }$tpl$::jsonb)

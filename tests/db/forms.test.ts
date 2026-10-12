@@ -2,13 +2,20 @@ import { it, expect } from "vitest";
 import type { Client } from "pg";
 import { withClient, asUser, asService, mkUser } from "./helpers";
 
+// Task 11b (0012): a patient or guardian can only SUBMIT through submit_form(), and can only GRANT a consent that a submitted form of theirs backs.
+// So these tests grant consents as staff, or through a submitted form whose template declares the purpose (SCHEMA_ALL does, for every purpose).
+const PURPOSES = ["treatment", "privacy_notice", "telehealth", "financial_terms", "share_referrer", "share_insurer"];
+const SCHEMA_ALL = { fields: PURPOSES.map((p) => ({ key: "c_" + p, label: p, type: "checkbox", consentPurpose: p })) };
+const submitAs = (c: Client, u: string, id: string, answers: object = {}) =>
+  asUser(c, u, () => c.query("select submit_form($1,$2::jsonb,'{}'::text[])", [id, JSON.stringify(answers)]));
+
 /** staff of every kind, two patients with their own users, and an active template reg v1 */
 async function seed(c: Client) {
   const psy = await mkUser(c, "psychologist"), adm = await mkUser(c, "admin"), bk = await mkUser(c, "bookkeeper");
   const u1 = await mkUser(c, "patient"), u2 = await mkUser(c, "patient");
   const p1 = (await c.query("insert into patients(user_id,first_name,last_name) values ($1,'A','A') returning id", [u1])).rows[0].id as string;
   const p2 = (await c.query("insert into patients(user_id,first_name,last_name) values ($1,'B','B') returning id", [u2])).rows[0].id as string;
-  const t = (await c.query("insert into form_templates(key,version,schema) values ('reg',1,'{\"q\":1}') returning id")).rows[0].id as string;
+  const t = (await c.query("insert into form_templates(key,version,schema) values ('reg',1,$1) returning id", [JSON.stringify(SCHEMA_ALL)])).rows[0].id as string;
   return { psy, adm, bk, u1, u2, p1, p2, t };
 }
 async function guardian(c: Client, patient: string, permissions: string, validTo: string | null = null) {
@@ -30,9 +37,10 @@ it("patient sees only own submissions", () => withClient(async (c) => {
   expect(await count(c, u1, "form_submissions")).toBe(1);
 }));
 it("withdrawing consent creates a task", () => withClient(async (c) => {
-  const u = await mkUser(c, "patient");
+  const u = await mkUser(c, "patient"), psy = await mkUser(c, "psychologist");
   const p = (await c.query("insert into patients(user_id,first_name,last_name) values ($1,'A','A') returning id", [u])).rows[0].id;
-  await asUser(c, u, async () => { await c.query("select set_consent($1,'telehealth',true,null)", [p]); await c.query("select set_consent($1,'telehealth',false,null)", [p]); });
+  await asUser(c, psy, () => c.query("select set_consent($1,'telehealth',true,null)", [p]));
+  await asUser(c, u, () => c.query("select set_consent($1,'telehealth',false,null)", [p])); // the patient withdraws without a form
   const t = await c.query("select 1 from tasks where patient_id=$1 and source='consent_withdrawn'", [p]);
   expect(t.rowCount).toBe(1);
 }));
@@ -43,7 +51,7 @@ it("form_submissions / consents / tasks read matrix", () => withClient(async (c)
   const gYes = await guardian(c, p1, '{"forms":true}'), gNo = await guardian(c, p1, '{"book":true,"forms":false}');
   const gOld = await guardian(c, p1, '{"forms":true}', "2000-01-01");
   await mkSub(c, p1, t);
-  await asUser(c, u1, () => c.query("select set_consent($1,'treatment',true,null)", [p1]));
+  await asUser(c, psy, () => c.query("select set_consent($1,'treatment',true,null)", [p1]));
   await c.query("insert into tasks(title) values ('x')");
   const m: [string, string, number, number, number][] = [ // user, label, submissions, consents, tasks
     [psy, "psychologist", 1, 1, 1], [adm, "admin", 1, 1, 1], [bk, "bookkeeper", 0, 0, 0],
@@ -95,7 +103,9 @@ it("patient updates: identity columns frozen, status draft->submitted only, DB s
   await expect(upd("status='returned'")).rejects.toThrow(/invalid_status_transition/);
   await expect(upd("status='bogus'")).rejects.toThrow(/invalid_status_transition/);
   expect((await sub(c, id)).submitted_at).toBeNull();
-  await upd("status='submitted'");
+  await expect(upd("status='submitted'")).rejects.toThrow(/use_submit_form/); // a plain UPDATE cannot submit (0012)
+  expect((await sub(c, id)).status).toBe("draft");
+  await submitAs(c, u1, id, { a: 1 });
   const s = await sub(c, id);
   expect(s.status).toBe("submitted");
   expect(s.submitted_at).not.toBeNull();
@@ -108,7 +118,7 @@ it("patient updates: identity columns frozen, status draft->submitted only, DB s
 it("staff may return a submitted form; the patient then edits and resubmits; submitted answers are frozen even for staff", () => withClient(async (c) => {
   const { psy, u1, p1, t } = await seed(c);
   const id = await mkSub(c, p1, t);
-  await asUser(c, u1, () => c.query("update form_submissions set answers='{\"a\":1}', status='submitted' where id=$1", [id]));
+  await submitAs(c, u1, id, { a: 1 });
   await asUser(c, psy, async () => {
     await expect(c.query("update form_submissions set answers='{\"a\":9}' where id=$1", [id])).rejects.toThrow(/submission is immutable/);
     await expect(c.query("update form_submissions set status='draft' where id=$1", [id])).rejects.toThrow(/submission is immutable/);
@@ -119,7 +129,7 @@ it("staff may return a submitted form; the patient then edits and resubmits; sub
   expect((await c.query("select action, actor_id from audit_log where entity_id=$1 order by id", [id])).rows).toEqual([{ action: "form.submit", actor_id: u1 }, { action: "form.return", actor_id: psy }]);
   await asUser(c, u1, async () => {
     await c.query(`update form_submissions set answers='{"a":2}' where id=$1`, [id]); // returned -> returned
-    await c.query("update form_submissions set status='submitted' where id=$1", [id]);
+    await c.query("select submit_form($1,'{\"a\":2}'::jsonb,'{}'::text[])", [id]);
   });
   const s = await sub(c, id);
   expect(s.status).toBe("submitted");
@@ -142,7 +152,7 @@ it("guardian writes forms only with permissions.forms = true", () => withClient(
   const id = (await ins(yes)).rows[0].id;
   await asUser(c, yes, async () => {
     await c.query(`update form_submissions set answers='{"g":1}' where id=$1`, [id]);
-    await c.query("update form_submissions set status='submitted' where id=$1", [id]);
+    await c.query("select submit_form($1,'{\"g\":1}'::jsonb,'{}'::text[])", [id]);
   });
   expect((await sub(c, id)).status).toBe("submitted");
   const id2 = await mkSub(c, p1, t);
@@ -173,21 +183,33 @@ it("a freshly registered patient has zero consent rows (nothing is bundled)", ()
 }));
 
 it("consents are recorded separately per purpose", () => withClient(async (c) => {
-  const { u1, p1 } = await seed(c);
-  await asUser(c, u1, () => c.query("select set_consent($1,'treatment',true,null)", [p1]));
+  const { psy, p1 } = await seed(c);
+  await asUser(c, psy, () => c.query("select set_consent($1,'treatment',true,null)", [p1]));
   expect((await c.query("select purpose from consents where patient_id=$1", [p1])).rows).toEqual([{ purpose: "treatment" }]);
-  await asUser(c, u1, () => c.query("select set_consent($1,'share_insurer',true,null)", [p1]));
+  await asUser(c, psy, () => c.query("select set_consent($1,'share_insurer',true,null)", [p1]));
   expect((await c.query("select purpose from consents where patient_id=$1 order by purpose", [p1])).rows.map((r) => r.purpose)).toEqual(["share_insurer", "treatment"]);
 }));
 
-it("set_consent: forbidden for other patients, bookkeeper, guardian without forms; allowed for staff and guardian with forms", () => withClient(async (c) => {
-  const { psy, adm, bk, u1, u2, p1 } = await seed(c);
+it("set_consent: forbidden for other patients, bookkeeper, guardian without forms; staff may grant; patient and guardian only through a submitted form", () => withClient(async (c) => {
+  const { psy, adm, bk, u1, u2, p1, t } = await seed(c);
   const yes = await guardian(c, p1, '{"forms":true}'), no = await guardian(c, p1, '{"book":true,"forms":false}');
-  const set = (u: string) => asUser(c, u, () => c.query("select set_consent($1,'treatment',true,null)", [p1]));
+  const set = (u: string, s: string | null = null) => asUser(c, u, () => c.query("select set_consent($1,'treatment',true,$2)", [p1, s]));
   for (const u of [u2, bk, no]) await expect(set(u)).rejects.toThrow(/forbidden/);
   expect((await c.query("select 1 from consents")).rowCount).toBe(0);
-  for (const u of [u1, yes, psy, adm]) await set(u);
+  // without a submission the patient and the guardian cannot grant (the only door is submitting the form)
+  for (const u of [u1, yes]) await expect(set(u)).rejects.toThrow(/consent_needs_submission/);
+  expect((await c.query("select 1 from consents")).rowCount).toBe(0);
+  for (const u of [psy, adm]) await set(u);
   expect((await consent(c, p1, "treatment")).granted).toBe(true);
+  // with a submitted form of theirs that declares the purpose they can (an unrelated purpose is refused below)
+  const mine = await mkSub(c, p1, t, "submitted");
+  for (const u of [u1, yes]) await set(u, mine);
+  const noDecl = (await c.query("insert into form_templates(key,version,schema) values ('other',1,'{\"fields\":[]}') returning id")).rows[0].id as string;
+  const sub2 = await mkSub(c, p1, noDecl, "submitted");
+  await expect(asUser(c, u1, () => c.query("select set_consent($1,'telehealth',true,$2)", [p1, sub2]))).rejects.toThrow(/consent_not_in_template/);
+  // withdrawing needs no form, for the patient and the guardian with forms
+  await asUser(c, u1, () => c.query("select set_consent($1,'treatment',false,null)", [p1]));
+  expect((await consent(c, p1, "treatment")).granted).toBe(false);
 }));
 
 it("set_consent validates purpose and the submission", () => withClient(async (c) => {
@@ -206,8 +228,8 @@ it("set_consent validates purpose and the submission", () => withClient(async (c
 }));
 
 it("withdrawal creates exactly one task; repeat withdrawal and withdrawing a never-granted purpose create none", () => withClient(async (c) => {
-  const { u1, p1 } = await seed(c);
-  const w = (granted: boolean, purpose = "telehealth") => asUser(c, u1, () => c.query("select set_consent($1,$2,$3,null)", [p1, purpose, granted]));
+  const { psy, u1, p1 } = await seed(c);
+  const w = (granted: boolean, purpose = "telehealth") => asUser(c, granted ? psy : u1, () => c.query("select set_consent($1,$2,$3,null)", [p1, purpose, granted]));
   const tasks = async () => (await c.query("select title, priority, source, assignee from tasks where patient_id=$1", [p1])).rows;
   await w(false, "share_referrer"); // nothing to withdraw
   expect(await tasks()).toEqual([]);
@@ -221,8 +243,8 @@ it("withdrawal creates exactly one task; repeat withdrawal and withdrawing a nev
 }));
 
 it("granting twice is idempotent and keeps granted_at; re-granting after withdrawal clears withdrawn_at", () => withClient(async (c) => {
-  const { u1, p1 } = await seed(c);
-  const w = (granted: boolean) => asUser(c, u1, () => c.query("select set_consent($1,'treatment',$2,null)", [p1, granted]));
+  const { psy, p1 } = await seed(c);
+  const w = (granted: boolean) => asUser(c, psy, () => c.query("select set_consent($1,'treatment',$2,null)", [p1, granted]));
   await w(true);
   await c.query("update consents set granted_at='2020-01-01T00:00:00Z' where patient_id=$1", [p1]);
   await w(true);
@@ -239,7 +261,7 @@ it("granting twice is idempotent and keeps granted_at; re-granting after withdra
 
 it("set_consent audit detail records the change, previous state and acting role", () => withClient(async (c) => {
   const { psy, u1, p1, t } = await seed(c);
-  const t2 = (await c.query("insert into form_templates(key,version,schema) values ('reg',2,'{}') returning id")).rows[0].id;
+  const t2 = (await c.query("insert into form_templates(key,version,schema) values ('reg',2,$1) returning id", [JSON.stringify(SCHEMA_ALL)])).rows[0].id;
   const s1 = await mkSub(c, p1, t, "submitted"), s2 = await mkSub(c, p1, t2, "submitted");
   const set = (u: string, g: boolean, s: string | null) => asUser(c, u, () => c.query("select set_consent($1,'treatment',$2,$3)", [p1, g, s]));
   const audit = async () => (await c.query("select action, actor_id, entity_id, detail from audit_log where entity='consents' order by id")).rows;
@@ -279,7 +301,7 @@ it("set_consent audit detail records the change, previous state and acting role"
 it("consents cannot be written directly by patients, guardians or staff, and are never deleted", () => withClient(async (c) => {
   const { psy, adm, u1, p1 } = await seed(c);
   const g = await guardian(c, p1, '{"forms":true}');
-  await asUser(c, u1, () => c.query("select set_consent($1,'treatment',true,null)", [p1]));
+  await asUser(c, psy, () => c.query("select set_consent($1,'treatment',true,null)", [p1]));
   for (const u of [u1, g, psy, adm]) {
     await expect(asUser(c, u, () => c.query("insert into consents(patient_id,purpose,granted) values ($1,'telehealth',true)", [p1]))).rejects.toThrow(/permission denied for table consents/);
     await expect(asUser(c, u, () => c.query("update consents set granted=false where patient_id=$1", [p1]))).rejects.toThrow(/permission denied for table consents/);
@@ -351,7 +373,7 @@ it("submission attribution: DB stamps submitted_by/submitted_at and audits every
   // patient submit
   const b = await mkSub(c, p2, t);
   const u2 = (await c.query("select user_id from patients where id=$1", [p2])).rows[0].user_id;
-  await asUser(c, u2, () => c.query("update form_submissions set status='submitted' where id=$1", [b]));
+  await submitAs(c, u2, b);
   expect((await sub(c, b)).submitted_by).toBe(u2);
   expect((await audit(b)).map((r) => r.actor_id)).toEqual([u2]);
   // staff cannot backdate on insert, nor smuggle a timestamp into a draft
@@ -366,7 +388,7 @@ it("submission attribution: DB stamps submitted_by/submitted_at and audits every
   // resubmission after a return is a new, audited transition by the resubmitter
   await asUser(c, psy, () => c.query("update form_submissions set status='returned', return_note='fix it' where id=$1", [b]));
   expect((await sub(c, b)).submitted_by).toBe(u2);
-  await asUser(c, u2, () => c.query("update form_submissions set status='submitted' where id=$1", [b]));
+  await submitAs(c, u2, b);
   expect((await audit(b)).length).toBe(2);
 }));
 
@@ -377,11 +399,11 @@ it("every submission is snapshotted: submit, return, edit, resubmit keeps both v
   const snaps = async () => (await c.query("select event, answers, template_version, actor from form_submission_versions where submission_id=$1 order by id", [id])).rows;
   await asUser(c, u1, () => c.query(`update form_submissions set answers='{"v":1}' where id=$1`, [id]));
   expect(await snaps()).toEqual([]); // drafts are not snapshotted
-  await asUser(c, u1, () => c.query("update form_submissions set status='submitted' where id=$1", [id]));
+  await submitAs(c, u1, id, { v: 1 });
   await asUser(c, psy, () => c.query("update form_submissions set status='returned', return_note='fix it' where id=$1", [id]));
   await asUser(c, u1, () => c.query(`update form_submissions set answers='{"v":2}' where id=$1`, [id]));
   expect((await snaps()).length).toBe(1); // editing a returned form does not snapshot
-  await asUser(c, u1, () => c.query("update form_submissions set status='submitted' where id=$1", [id]));
+  await submitAs(c, u1, id, { v: 2 });
   expect(await snaps()).toEqual([
     { event: "submitted", answers: { v: 1 }, template_version: 1, actor: u1 },
     { event: "submitted", answers: { v: 2 }, template_version: 1, actor: u1 }]);
@@ -415,7 +437,7 @@ it("expired guardian cannot set consent or write submissions; bookkeeper/associa
   // unknown template id on a patient insert
   await expect(asUser(c, u1, () => c.query("insert into form_submissions(patient_id,template_id,template_version) values ($1,gen_random_uuid(),1)", [p1]))).rejects.toThrow(/template_not_active/);
   // admin returns a submitted form, audited
-  await asUser(c, u1, () => c.query("update form_submissions set status='submitted' where id=$1", [id]));
+  await submitAs(c, u1, id);
   await asUser(c, adm, () => c.query("update form_submissions set status='returned', return_note='fix it' where id=$1", [id]));
   expect((await sub(c, id)).status).toBe("returned");
   expect((await c.query("select actor_id, role from audit_log where entity_id=$1 and action='form.return'", [id])).rows).toEqual([{ actor_id: adm, role: "admin" }]);

@@ -230,3 +230,84 @@ it("helper functions are not callable anonymously", () => withClient(async (c) =
   await expect(c.query("select staff_form_access(gen_random_uuid())")).rejects.toThrow(/permission denied/);
   await c.query("reset role");
 }));
+
+// ---- fix round 1 ---------------------------------------------------------------------------------------------------------
+it("unticking an optional consent on a resubmit withdraws it (evidence kept, one task, audit); a never-given purpose gets no row and no task", () => withClient(async (c) => {
+  const { psy, u1, p1, t } = await seed(c);
+  const id = await draft(c, p1, t);
+  await submit(c, u1, id, { ...ANSWERS, share_referrer: true }, ["treatment", "share_referrer"]);
+  expect((await c.query("select granted from consents where patient_id=$1 and purpose='share_referrer'", [p1])).rows).toEqual([{ granted: true }]);
+  await asUser(c, psy, () => c.query("update form_submissions set status='returned', return_note='fix it' where id=$1", [id]));
+  // resubmit with the optional box unticked
+  await submit(c, u1, id, { ...ANSWERS, share_referrer: false }, ["treatment"]);
+  const r = (await c.query("select granted, granted_at, withdrawn_at, form_submission_id, template_version from consents where patient_id=$1 and purpose='share_referrer'", [p1])).rows[0];
+  expect(r.granted).toBe(false);
+  expect(r.withdrawn_at).not.toBeNull();
+  expect(r.granted_at).not.toBeNull();
+  expect(r.form_submission_id).toBe(id); // the evidence of what was agreed stays
+  expect(r.template_version).toBe(3);
+  expect((await c.query("select granted from consents where patient_id=$1 and purpose='treatment'", [p1])).rows).toEqual([{ granted: true }]);
+  expect((await c.query("select title, priority from tasks where patient_id=$1 and source='consent_withdrawn'", [p1])).rows).toEqual([{ title: "Consent withdrawn: share_referrer", priority: "high" }]);
+  expect((await c.query("select 1 from audit_log where entity_id=$1 and action='consent.withdraw'", [p1])).rowCount).toBe(1);
+
+  // a different patient who never gave share_referrer: unticked means nothing to withdraw
+  const u3 = await mkUser(c, "patient");
+  const p3 = (await c.query("insert into patients(user_id,first_name,last_name) values ($1,'C','C') returning id", [u3])).rows[0].id as string;
+  const id3 = await draft(c, p3, t);
+  await submit(c, u3, id3);
+  expect((await c.query("select purpose from consents where patient_id=$1", [p3])).rows).toEqual([{ purpose: "treatment" }]);
+  expect((await c.query("select 1 from tasks where patient_id=$1", [p3])).rowCount).toBe(0);
+}));
+
+it("a patient or guardian cannot submit with a plain UPDATE; staff still can; submit_form works", () => withClient(async (c) => {
+  const { psy, u1, p1, t } = await seed(c);
+  const g = await guardian(c, p1, '{"forms":true}');
+  const id = await draft(c, p1, t);
+  for (const u of [u1, g]) {
+    await expect(asUser(c, u, () => c.query("update form_submissions set status='submitted' where id=$1", [id]))).rejects.toThrow(/use_submit_form/);
+    await expect(asUser(c, u, () => c.query(`update form_submissions set answers='{"a":1}', status='submitted', submitted_at=now() where id=$1`, [id]))).rejects.toThrow(/use_submit_form/);
+  }
+  expect((await sub(c, id)).status).toBe("draft");
+  expect((await c.query("select 1 from form_submission_versions")).rowCount).toBe(0);
+  // returned forms too
+  await asUser(c, psy, () => c.query("update form_submissions set status='submitted' where id=$1", [id])); // staff direct submit stays allowed ...
+  expect((await sub(c, id)).submitted_by).toBe(psy);
+  expect((await auditActions(c, id)).map((r) => r.action)).toEqual(["form.submit"]); // ... and audited
+  await asUser(c, psy, () => c.query("update form_submissions set status='returned', return_note='fix' where id=$1", [id]));
+  await expect(asUser(c, u1, () => c.query("update form_submissions set status='submitted' where id=$1", [id]))).rejects.toThrow(/use_submit_form/);
+  await submit(c, u1, id);
+  expect((await sub(c, id)).status).toBe("submitted");
+}));
+
+it("set_consent: a patient grant needs a submitted form that declares the purpose", () => withClient(async (c) => {
+  const { u1, p1, t } = await seed(c);
+  const id = await draft(c, p1, t);
+  const grant = (purpose: string, s: string | null) => asUser(c, u1, () => c.query("select set_consent($1,$2,true,$3)", [p1, purpose, s]));
+  await expect(grant("treatment", null)).rejects.toThrow(/consent_needs_submission/);
+  await expect(grant("treatment", id)).rejects.toThrow(/submission_not_submitted/);
+  await submit(c, u1, id, { name: "x", consent_treatment: false }, []).catch(() => undefined); // required consent missing: still a draft
+  expect((await c.query("select 1 from consents")).rowCount).toBe(0);
+  await submit(c, u1, id);
+  await expect(grant("telehealth", id)).rejects.toThrow(/consent_not_in_template/); // this form does not declare telehealth
+  await grant("share_referrer", id); // declared by this form
+  expect((await c.query("select purpose from consents where patient_id=$1 order by purpose", [p1])).rows.map((r) => r.purpose)).toEqual(["share_referrer", "treatment"]);
+}));
+
+it("restricted is inherited by new versions of the same template key", () => withClient(async (c) => {
+  const { adm, p1 } = await seed(c);
+  const ins = async (key: string, v: number, schema: object) => (await c.query("insert into form_templates(key,version,schema) values ($1,$2,$3) returning id, schema", [key, v, JSON.stringify(schema)])).rows[0];
+  await ins("medical_history", 1, { fields: [], restricted: true });
+  const v2 = await ins("medical_history", 2, { fields: [{ key: "a", label: "A", type: "text" }] }); // flag forgotten
+  const v3 = await ins("medical_history", 3, { fields: [], restricted: false });
+  expect(v2.schema.restricted).toBe(true);
+  expect(v3.schema.restricted).toBe(true);
+  expect(v2.schema.fields).toHaveLength(1); // the rest of the schema is untouched
+  const other = await ins("registration", 1, { fields: [] });
+  expect(other.schema.restricted).toBeUndefined();
+  // editing an unused version cannot drop it either
+  await c.query("update form_templates set schema='{\"fields\":[]}' where id=$1", [v2.id]);
+  expect((await c.query("select schema from form_templates where id=$1", [v2.id])).rows[0].schema.restricted).toBe(true);
+  // and the admin therefore cannot see v2 submissions
+  await draft(c, p1, v2.id);
+  expect((await asUser(c, adm, () => c.query("select 1 from form_submissions"))).rowCount).toBe(0);
+}));

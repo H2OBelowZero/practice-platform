@@ -6,7 +6,7 @@ import type { ActionState } from "@/lib/appointments/types";
 import { consentPurposesFrom } from "@/lib/forms/consent";
 import { draftAnswers } from "@/lib/forms/draft";
 import { FORM_ERROR, formErrorText } from "@/lib/forms/errors";
-import { answersSchema, startSchema, submissionId } from "@/lib/forms/input";
+import { answersSchema, seenSchema, startSchema, submissionId } from "@/lib/forms/input";
 import { loadSubmission } from "@/lib/forms/load";
 import { validateAnswers } from "@/lib/forms/validate";
 import { supabaseServer } from "@/lib/supabase/server";
@@ -15,7 +15,7 @@ import { supabaseServer } from "@/lib/supabase/server";
 // submit_form() (0012) decide, all through the caller's own Supabase client. Nothing here uses the service client.
 const PORTAL = ["patient", "guardian"] as const;
 
-export type SaveResult = { ok: true; at: string } | { ok: false; error: string };
+export type SaveResult = { ok: true; at: string } | { ok: false; error: string; conflict?: true };
 /** Submit either redirects (success) or comes back with a message and one message per failing field. */
 export type SubmitResult = { ok: false; error: string; errors: Record<string, string> };
 
@@ -43,20 +43,25 @@ export async function startForm(rawPatient: unknown, rawTemplate: unknown): Prom
  * Autosave. The answers are sanitised against the template first (only its own keys, right types, nothing required), then written with a
  * plain update that RLS limits to draft and returned forms. A submitted form cannot be changed (zero rows come back).
  */
-export async function saveDraft(rawId: unknown, rawAnswers: unknown): Promise<SaveResult> {
+export async function saveDraft(rawId: unknown, rawAnswers: unknown, rawSeen: unknown): Promise<SaveResult> {
   await requireRole([...PORTAL]);
-  const id = submissionId.safeParse(rawId), answers = answersSchema.safeParse(rawAnswers);
-  if (!id.success || !answers.success) return { ok: false, error: FORM_ERROR.invalid };
+  const id = submissionId.safeParse(rawId), answers = answersSchema.safeParse(rawAnswers), seen = seenSchema.safeParse(rawSeen);
+  if (!id.success || !answers.success || !seen.success) return { ok: false, error: FORM_ERROR.invalid };
   const sb = await supabaseServer();
 
   const sub = await loadSubmission(sb, id.data);
   if (!sub) return { ok: false, error: FORM_ERROR.missing };
   if (sub.status === "submitted") return { ok: false, error: FORM_ERROR.closed };
 
+  // optimistic concurrency: only overwrite the version this editor last saw or loaded (another tab or device may have saved since)
   const { data, error } = await sb.from("form_submissions").update({ answers: draftAnswers(sub.schema, answers.data) })
-    .eq("id", sub.id).in("status", ["draft", "returned"]).select("updated_at");
+    .eq("id", sub.id).eq("updated_at", seen.data).in("status", ["draft", "returned"]).select("updated_at");
   if (error) return { ok: false, error: formErrorText(error.message) };
-  if (!data?.length) return { ok: false, error: FORM_ERROR.closed };
+  if (!data?.length) {
+    const now = await loadSubmission(sb, sub.id);
+    if (now && now.status !== "submitted" && now.updated_at !== seen.data) return { ok: false, error: FORM_ERROR.conflict, conflict: true };
+    return { ok: false, error: FORM_ERROR.closed };
+  }
   return { ok: true, at: data[0].updated_at as string };
 }
 

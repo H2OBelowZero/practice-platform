@@ -6,7 +6,8 @@ export const FORM_ERROR = {
   closed: "This form has already been submitted, so it can no longer be changed.",
   forbidden: "You do not have permission to do that.",
   unavailable: "This form is not available right now. Please contact the practice.",
-  fix: "Please check the answers marked below and try again.",
+  fix: "Please check the answers listed below and try again.",
+  conflict: "This form was changed elsewhere. Reload to see the latest answers.",
 } as const;
 
 /** Map a database error message (from submit_form, set_consent, fs_guard, RLS) to text for the person. */

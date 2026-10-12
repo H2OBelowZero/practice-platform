@@ -113,7 +113,7 @@ export default async function PortalPrivacy({ searchParams }: { searchParams: Pr
         <h2 id="rights-h" className="mb-3">Your information and your rights</h2>
         <p className="mb-3">
           You can ask the practice for a copy of the personal information it holds about you, and ask for anything that is wrong or out of date to be corrected
-          or deleted, as the Protection of Personal Information Act (POPIA) and the Promotion of Access to Information Act (PAIA) allow. To do so, tell the practice
+          or deleted where the law allows (the practice may have to keep some records, for example clinical records, for a set time), as the Protection of Personal Information Act (POPIA) and the Promotion of Access to Information Act (PAIA) provide. To do so, tell the practice
           in writing, for example by email or at your next appointment, and ask for the practice&apos;s Information Officer.
         </p>
         <p>If you are not happy with how your information is handled, you may complain to the Information Regulator (inforegulator.org.za).</p>

@@ -6,14 +6,14 @@ export type FormEmailTemplate = "form_requested" | "form_returned";
 
 /**
  * Queue a short email for the notification worker (Task 15): "you have a form waiting" / "a form was returned". The payload is the link to the
- * portal documents page ONLY: no form name, no note, no patient name. Written with the service client (the outbox is service-role only).
+ * portal documents page ONLY (or, for a patient who has no portal account yet, the registration page that returns there): no form name, no note, no patient name. Written with the service client (the outbox is service-role only).
  * Never throws: the form change has already happened, so a failure is logged (code only) and reported as false.
  */
-export async function queueFormEmail(template: FormEmailTemplate, recipient: string | null | undefined): Promise<boolean> {
+export async function queueFormEmail(template: FormEmailTemplate, recipient: string | null | undefined, hasAccount = true): Promise<boolean> {
   if (!recipient) return false;
   try {
     const { error } = await supabaseService().from("notifications_outbox").insert({
-      channel: "email", template, recipient, payload: { link: `${appUrl()}/portal/documents` },
+      channel: "email", template, recipient, payload: { link: hasAccount ? `${appUrl()}/portal/documents` : `${appUrl()}/register?next=/portal/documents` },
     });
     if (error) { console.error(`${template} not queued:`, error.code); return false; }
     return true;

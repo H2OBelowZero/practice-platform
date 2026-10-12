@@ -87,7 +87,7 @@ const privacyNotice: FormSchema = {
     "Your rights. You may ask to see your information, ask us to correct it, ask us to delete what we are not required to keep, object to some uses, and withdraw consent you have given. Withdrawing consent does not affect what we did before you withdrew. You may also complain to the Information Regulator.\n\n" +
     "Questions or requests: contact the practice using the details on our website or in your confirmation emails.",
   fields: [
-    { key: "read_notice", label: "I have read this privacy notice and I agree that the practice may process my personal information, including my health information, as described.", type: "checkbox", required: true, consentPurpose: "privacy_notice", help: "You can withdraw this consent later from the Documents page of your account." },
+    { key: "read_notice", label: "I have read this privacy notice and I agree that the practice may process my personal information, including my health information, as described.", type: "checkbox", required: true, consentPurpose: "privacy_notice", help: "You can withdraw this consent later from the Privacy page of your account." },
   ],
 };
 
@@ -167,6 +167,9 @@ const shareWithInsurer: FormSchema = {
     { key: "share_insurer", label: "I give the practice permission to share the information described above with my medical aid for claims.", type: "checkbox", consentPurpose: "share_insurer", help: "Leave this unticked if you do not want us to share anything." },
   ],
 };
+
+/** Template keys whose submissions only the psychologist may read (clinical history). Every version of these must carry `restricted: true` (a unit test checks it; the database also inherits the flag). */
+export const RESTRICTED_KEYS: readonly string[] = ["medical_history"];
 
 export const TEMPLATES: SeedTemplate[] = [
   { key: "registration", version: 1, schema: registration },

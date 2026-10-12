@@ -23,7 +23,7 @@ export async function requestForm(rawPatient: unknown, values: Values): Promise<
   if (!v.success) return { error: "Choose a form to request." };
   const sb = await supabaseServer();
 
-  const { data: patient } = await sb.from("patients").select("id, status").eq("id", pid.data).maybeSingle();
+  const { data: patient } = await sb.from("patients").select("id, status, user_id").eq("id", pid.data).maybeSingle();
   if (!patient) return { error: "We could not find that patient." };
   if (patient.status === "archived") return { error: "This patient is archived. Restore them before requesting a form." };
 
@@ -37,7 +37,7 @@ export async function requestForm(rawPatient: unknown, values: Values): Promise<
   const { data, error } = await sb.from("form_submissions").insert({ patient_id: pid.data, template_id: tpl.id, template_version: tpl.version }).select("id").single();
   if (error || !data) return { error: /row-level security/.test(error?.message ?? "") ? "Only the psychologist can request this form." : formErrorText(error?.message) };
 
-  const queued = await queueFormEmail("form_requested", await patientEmail(sb, pid.data));
+  const queued = await queueFormEmail("form_requested", await patientEmail(sb, pid.data), patient.user_id !== null);
   await safely("form.request", () => audit("form.request", "form_submissions", data.id as string, { patient_id: pid.data, template_key: tpl.key, template_version: tpl.version, email_queued: queued }));
   return redirect(`/app/patients/${pid.data}?tab=forms&notice=form_requested`);
 }
@@ -55,6 +55,7 @@ export async function returnForm(rawPatient: unknown, rawSubmission: unknown, va
   if (error) return { error: formErrorText(error.message) };
   if (!data?.length) return { error: "Only a submitted form can be returned. It may already have been returned." };
 
-  await queueFormEmail("form_returned", await patientEmail(sb, pid.data));
+  const { data: who } = await sb.from("patients").select("user_id").eq("id", pid.data).maybeSingle();
+  await queueFormEmail("form_returned", await patientEmail(sb, pid.data), !!who?.user_id);
   return redirect(`/app/patients/${pid.data}?tab=forms&notice=form_returned`);
 }
