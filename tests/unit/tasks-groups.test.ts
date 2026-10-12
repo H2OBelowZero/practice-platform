@@ -94,6 +94,7 @@ describe("list helpers", () => {
   it("due bounds are SAST days", () => {
     const today = "2031-03-10";
     expect(dueBounds("overdue", today)).toEqual({ lt: sastMidnight("2031-03-10") });
+    expect(dueBounds("now", today)).toEqual({ lt: sastMidnight("2031-03-11") });
     expect(dueBounds("today", today)).toEqual({ gte: sastMidnight("2031-03-10"), lt: sastMidnight("2031-03-11") });
     expect(dueBounds("week", today)).toEqual({ gte: sastMidnight("2031-03-10"), lt: sastMidnight("2031-03-18") });
     expect(dueBounds("none", today)).toEqual({ isNull: true });

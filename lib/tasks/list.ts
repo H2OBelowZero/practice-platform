@@ -4,10 +4,10 @@ import { addDays, isRealDate, sastDate, sastMidnight } from "@/lib/time";
 export const PRIORITIES = [{ value: "high", label: "High" }, { value: "normal", label: "Normal" }, { value: "low", label: "Low" }] as const;
 export const PRIORITY_FILTERS = [{ value: "", label: "Any priority" }, ...PRIORITIES] as const;
 export const DUE_FILTERS = [
-  { value: "", label: "Any due date" }, { value: "overdue", label: "Overdue" }, { value: "today", label: "Due today" },
+  { value: "", label: "Any due date" }, { value: "overdue", label: "Overdue" }, { value: "now", label: "Due today or overdue" }, { value: "today", label: "Due today" },
   { value: "week", label: "Due in the next 7 days" }, { value: "none", label: "No due date" },
 ] as const;
-export type TaskDueFilter = "overdue" | "today" | "week" | "none";
+export type TaskDueFilter = "overdue" | "now" | "today" | "week" | "none";
 
 export const parseTaskStatus = (s: string | undefined): "open" | "done" => (s === "done" ? "done" : "open");
 export const parseTaskPriority = (s: string | undefined): string => (PRIORITIES.some((p) => p.value === s) ? (s as string) : "");
@@ -20,6 +20,7 @@ export const PRIORITY_LABEL: Record<string, string> = { high: "High priority", n
 export function dueBounds(f: TaskDueFilter, today: string): { gte?: string; lt?: string; isNull?: true } {
   const start = sastMidnight(today);
   if (f === "overdue") return { lt: start };
+  if (f === "now") return { lt: sastMidnight(addDays(today, 1)) };
   if (f === "today") return { gte: start, lt: sastMidnight(addDays(today, 1)) };
   if (f === "week") return { gte: start, lt: sastMidnight(addDays(today, 8)) };
   return { isNull: true };
@@ -57,3 +58,10 @@ export const updateTaskSchema = z.object({ due: dueDate, priority });
 
 /** Due date (YYYY-MM-DD, SAST) to the stored instant: the start of that SAST day. */
 export const dueInstant = (date: string | undefined): string | null => (date ? sastMidnight(date) : null);
+
+// Success messages shown after a redirect (?notice=code). Only codes in this map are ever rendered.
+const NOTICES = {
+  created: "The task has been added.", updated: "The task has been updated.", unchanged: "Nothing was changed.",
+  done: "The task is marked done.", reopened: "The task is open again.",
+} as const;
+export const taskNotice = (code: string | undefined): string | undefined => (code !== undefined && Object.hasOwn(NOTICES, code) ? NOTICES[code as keyof typeof NOTICES] : undefined);
