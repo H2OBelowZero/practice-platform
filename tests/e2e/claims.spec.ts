@@ -79,7 +79,7 @@ test.describe("medical aid claim workflow", () => {
     await page.getByLabel("Amount the scheme paid (rand)").fill("600,00");
     await page.getByRole("button", { name: "Record scheme payment" }).click();
     await page.getByRole("group", { name: "Record this scheme payment?" }).getByRole("button", { name: "Yes, record the payment" }).click();
-    await expect(page.getByText("Enter the remittance advice number.").first()).toBeVisible();
+    await expect(page.getByTestId("form-error").getByText("Enter the remittance advice number.")).toBeVisible();
     await page.getByLabel("Remittance reference").fill(`E2E-RA-${run}`);
     await page.getByRole("button", { name: "Record scheme payment" }).click();
     await page.getByRole("group", { name: "Record this scheme payment?" }).getByRole("button", { name: "Yes, record the payment" }).click();
@@ -111,7 +111,7 @@ test.describe("medical aid claim workflow", () => {
 
     await page.getByRole("button", { name: "Mark as rejected" }).click();
     await page.getByRole("group", { name: "Mark this claim as rejected?" }).getByRole("button", { name: "Yes, mark as rejected" }).click();
-    await expect(page.getByText("Give the reason the claim was rejected.").first()).toBeVisible();
+    await expect(page.getByTestId("form-error").getByText("Give the reason the claim was rejected.")).toBeVisible();
     await page.getByLabel("Why was it rejected?").fill("Pre-authorisation number missing");
     await page.getByRole("button", { name: "Mark as rejected" }).click();
     await page.getByRole("group", { name: "Mark this claim as rejected?" }).getByRole("button", { name: "Yes, mark as rejected" }).click();

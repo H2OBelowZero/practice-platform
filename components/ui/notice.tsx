@@ -11,16 +11,16 @@ const TONE: Record<NoticeTone, { box: string; icon: IconName; word: string }> = 
   error: { box: "border-danger bg-danger-tint text-danger-strong", icon: "alert", word: "Error" },
 };
 
-type Props = { tone?: NoticeTone; title?: string; children: ReactNode; className?: string; id?: string; focusable?: boolean };
+type Props = { tone?: NoticeTone; title?: string; children: ReactNode; className?: string; id?: string; focusable?: boolean; testId?: string };
 
 /**
  * Message box: icon + a text prefix (read by screen readers and visible), colour only reinforces.
  * Errors/warnings use role="alert"; info/success use role="status". `focusable` lets a form move focus to an error summary.
  */
-export const Notice = forwardRef<HTMLDivElement, Props>(function Notice({ tone = "info", title, children, className, id, focusable }, ref) {
+export const Notice = forwardRef<HTMLDivElement, Props>(function Notice({ tone = "info", title, children, className, id, focusable, testId }, ref) {
   const t = TONE[tone];
   return (
-    <div ref={ref} id={id} tabIndex={focusable ? -1 : undefined} role={focusable ? undefined : tone === "error" || tone === "warning" ? "alert" : "status"}
+    <div ref={ref} id={id} data-testid={testId} tabIndex={focusable ? -1 : undefined} role={focusable ? undefined : tone === "error" || tone === "warning" ? "alert" : "status"}
          className={cx("mb-5 flex gap-3 rounded-xl border-l-4 p-4", t.box, className)}>
       <Icon name={t.icon} className="mt-1" />
       <div>

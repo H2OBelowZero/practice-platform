@@ -8,5 +8,5 @@ export function FormError({ message, state }: { message?: string | null; state?:
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => { if (message) ref.current?.focus(); }, [message, state]);
   if (!message) return null;
-  return <Notice ref={ref} tone="error" focusable>{message}</Notice>;
+  return <Notice ref={ref} tone="error" focusable testId="form-error">{message}</Notice>;
 }

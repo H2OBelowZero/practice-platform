@@ -223,7 +223,10 @@ export async function markAccepted(rawId: unknown, values: Values): Promise<Acti
   if (!a.ok) return { error: a.error, field: "approved" };
   if (a.value.approvedCents > claim.claimed_cents) return { error: `The approved amount cannot be more than the amount claimed (${formatZar(claim.claimed_cents)}).`, field: "approved" };
   const { data, error } = await sb.from("claims").update({ status: ACTION_TO.accept, approved_cents: a.value.approvedCents }).eq("id", claim.id).eq("status", claim.status).select("id, status");
-  if (error) return { error: claimErrorText(error.message) };
+  if (error) {
+    const code = claimErrorCode(error.message);
+    return { error: CLAIM_ERROR[code], field: code === "approved_below_remitted" || code === "amount_over_claimed" || code === "approved_frozen" ? "approved" : undefined };
+  }
   if (!data?.length) return STALE;
   await safely("claim.accept", () => audit("claim.accept", "claims", claim.id, ids(claim, patientId)));
   return done(claim.id, (data[0] as { status: string }).status === "paid" ? "accepted_paid" : "accepted");

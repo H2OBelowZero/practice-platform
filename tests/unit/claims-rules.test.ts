@@ -233,9 +233,16 @@ describe("database errors in plain language", () => {
       ["claim_frozen", "claim_frozen"], ["claim_link_frozen", "claim_link_frozen"], ["claim_amount_frozen", "claim_amount_frozen"], ["rejection_reason_required", "rejection_reason_required"],
       ['new row for relation "claims" violates check constraint "claims_check"', "amount_over_claimed"],
       ['new row for relation "claims" violates check constraint "claims_claimed_cents_check"', "invalid_check_amount"],
+      ["claim_has_payments", "claim_has_payments"], ["claimed_below_remitted", "claimed_below_remitted"], ["approved_frozen", "approved_frozen"], ["approved_below_remitted", "approved_below_remitted"],
       ["invalid_ref", "invalid_ref"], ["icd10_required", "icd10_required"], ["claimed_amount_required", "claimed_amount_required"],
     ];
     for (const [msg, code] of cases) expect(claimErrorCode(msg), msg).toBe(code);
+  });
+  it("an approved amount below what was paid explains the way out in plain language", () => {
+    const t = claimErrorText("approved_below_remitted");
+    expect(t).toMatch(/at least what was paid/);
+    expect(t).toMatch(/credit note or an adjustment/);
+    expect(claimErrorText("claim_has_payments")).toMatch(/already paid/);
   });
   it("anything else is generic and never echoes the message", () => {
     expect(claimErrorCode("syntax error at or near F41.1")).toBe("generic");
