@@ -1,7 +1,7 @@
 /** The plain-language definition shown under each report (and tested: the wording is part of what the owner agreed to). */
 export const DEFINITIONS = {
   incomeByMonth:
-    "Invoiced = the total of invoices issued in that month, excluding drafts and invoices you voided by hand. An invoice that was cancelled by credit notes (credited in full, which the system records as void) still counts in the month it was issued, so a closed month never changes. " +
+    "Invoiced = the total of invoices issued in that month, excluding drafts and invoices you voided by hand. An invoice that was cancelled by credit notes (credited in full, which the system records as void) still counts in the month it was issued, so a closed month never changes. Invoices cannot be voided by hand once a credit note exists; credit the remainder instead. " +
     "Received = payments that arrived in that month, by the date the money arrived. Credit notes = credit notes made in that month, whatever happened to the invoice afterwards. " +
     "VAT included = the VAT in the invoiced amount; VAT on credit notes = the VAT those credit notes carry, worked out in proportion to the invoice (subtract it for the net VAT). The first and last month only count the days inside the period.",
   incomeByMethod: "Money received in the period, grouped by how it was paid. Payments that are pending or failed are not counted. Medical aid = payments from a scheme, recorded from its remittance advice.",

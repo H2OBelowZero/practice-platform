@@ -10,7 +10,7 @@ describe("billing database errors in plain language", () => {
     ["task_not_open", "task_not_open"], ["zero_total", "zero_total"], ["portions_mismatch", "portions_mismatch"], ["self_pay_has_scheme_portion", "self_pay_has_scheme_portion"],
     ["totals_mismatch", "totals_mismatch"], ["lines_mismatch", "lines_mismatch"], ["lines_required", "lines_required"], ["invalid_line", "invalid_line"], ["invoice_not_draft", "invoice_not_draft"],
     ["invoice_frozen", "invoice_frozen"], ["invoice_lines_frozen", "invoice_lines_frozen"], ["invoice_void_is_final", "invoice_void_is_final"],
-    ["invalid_invoice_transition", "invalid_invoice_transition"], ["invoice_has_payments", "invoice_has_payments"], ["invoice_has_open_claims", "invoice_has_open_claims"],
+    ["invalid_invoice_transition", "invalid_invoice_transition"], ["invoice_has_payments", "invoice_has_payments"], ["invoice_has_credits", "invoice_has_credits"], ["invoice_has_open_claims", "invoice_has_open_claims"],
     ["invoice_not_payable", "invoice_not_payable"], ["invoice_not_creditable", "invoice_not_creditable"], ["overpay", "overpay"],
     ["credit_exceeds_outstanding", "credit_exceeds_outstanding"],
     ["credit_exceeds_scheme_portion", "credit_exceeds_scheme_portion"], ["credit_exceeds_patient_portion", "credit_exceeds_patient_portion"], ["portion_required", "portion_required"], ["portion_not_allowed", "portion_not_allowed"],
@@ -31,6 +31,13 @@ describe("billing database errors in plain language", () => {
     }
   });
 
+  it("a hand void after a credit note is explained, and the invoice page hides Void and shows that same sentence", () => {
+    expect(billingErrorText("ERROR:  invoice_has_credits")).toBe("This invoice has credit notes. To close it, add a credit note for the remaining amount instead.");
+    const page = readFileSync(join(__dirname, "..", "..", "app", "app", "billing", "[invoiceId]", "page.tsx"), "utf8");
+    expect(page).toContain('const voidable = write && (draft || inv.status === "issued") && !hasCredits;');
+    expect(page).toContain("{BILLING_ERROR.invoice_has_credits}");
+  });
+
   it("the matching works inside a longer database message", () => {
     expect(billingErrorCode("ERROR:  overpay\nCONTEXT:  PL/pgSQL function payments_guard()")).toBe("overpay");
   });
@@ -41,7 +48,7 @@ describe("billing database errors in plain language", () => {
 
   it("every exception the billing SQL can raise is mapped (so none shows as 'something went wrong' by accident)", () => {
     const dir = join(__dirname, "..", "..", "supabase", "migrations");
-    const sql = ["0005_billing.sql", "0015_invoice_per_appointment.sql", "0016_billing_fixes.sql", "0017_credit_note_portion.sql"].map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
+    const sql = ["0005_billing.sql", "0015_invoice_per_appointment.sql", "0016_billing_fixes.sql", "0017_credit_note_portion.sql", "0026_void_with_credits.sql"].map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
     const raised = [...new Set([...sql.matchAll(/raise exception '([a-z_0-9]+)'/g)].map((m) => m[1]))];
     // codes the billing UI never triggers from a staff session (claims, remittance, ledger internals) are listed here on purpose
     const NOT_FROM_THESE_SCREENS = new Set([

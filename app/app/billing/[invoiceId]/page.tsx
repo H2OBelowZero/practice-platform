@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireRole } from "@/lib/auth/session";
 import { invoiceAuditFilter, invoiceEventText, isOverdue, METHOD_LABEL, PAYER_LABEL, paymentRef, ROLE_LABEL } from "@/lib/billing/list";
+import { BILLING_ERROR } from "@/lib/billing/errors";
 import { billingNotice } from "@/lib/billing/notices";
 import { defaultDueDate, uuid } from "@/lib/billing/input";
 import { outstandingCents } from "@/lib/billing/outstanding";
@@ -92,7 +93,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const roleOf = new Map((profs ?? []).map((p) => [p.user_id as string, p.role as string]));
   const nameOf = new Map((profs ?? []).map((p) => [p.user_id as string, (p.display_name as string | null) || "Unnamed user"]));
 
-  const voidable = write && (draft || inv.status === "issued");
+  const hasCredits = credits.length > 0; // the database refuses a hand void once a credit note exists (0026): credit the remainder instead
+  const voidable = write && (draft || inv.status === "issued") && !hasCredits;
 
   // Open a claim: staff only, an open medical aid / split invoice with some of the scheme portion still unclaimed and a current membership
   const canOpenClaim = write && open && inv.payer_type !== "self" && claimableCents(inv.scheme_portion_cents, claims) > 0;
@@ -304,6 +306,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
           )}
         </section>
       )}
+      {write && inv.status === "issued" && hasCredits && <p className="mb-6 text-ink-muted">{BILLING_ERROR.invoice_has_credits}</p>}
       {write && inv.status === "part_paid" && <p className="mb-6 text-ink-muted">This invoice has payments, so it cannot be voided. Use a credit note to reduce what is owed.</p>}
 
       {me.role === "psychologist" && (

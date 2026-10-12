@@ -143,9 +143,13 @@ describe("report_compliance only counts audit actions that something writes", ()
     });
     expect(missing).toEqual([]);
   });
-  it("the allow-list is exactly the settings families, and nothing writes them yet (this test is the reminder to remove them from the list when 16c lands)", () => {
+  it("the allow-listed families have NO writer yet: when Task 16c adds one this fails, and the allow-list entry must then be removed so the first test covers it", () => {
     expect(NOT_WRITTEN_YET).toEqual(["settings.%", "practice.%"]);
     expect(counted).toEqual(expect.arrayContaining(NOT_WRITTEN_YET));
+    for (const family of NOT_WRITTEN_YET) {
+      const prefix = family.slice(0, -1).replace(".", "\\.");
+      expect(new RegExp("[\"'`]" + prefix + "[a-z_]+[\"'`]").test(writers), family + " now has a writer: remove it from NOT_WRITTEN_YET").toBe(false);
+    }
   });
 });
 
