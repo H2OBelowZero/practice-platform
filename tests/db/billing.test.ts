@@ -27,7 +27,7 @@ it("claim submission does not change paid state; remittance does and keeps patie
   const { i, p } = await inv(c);
   await c.query("update invoices set scheme_portion_cents=80000, patient_portion_cents=20000 where id=$1", [i]);
   const m = (await c.query("insert into medical_aid_members(patient_id,scheme,member_number) values ($1,'Discovery','123') returning id", [p])).rows[0].id;
-  const cl = (await c.query("insert into claims(invoice_id,member_id,status,claimed_cents) values ($1,$2,'submitted',80000) returning id", [i, m])).rows[0].id;
+  const cl = (await c.query("insert into claims(invoice_id,member_id,status,claimed_cents,icd10_codes) values ($1,$2,'submitted',80000,'{F41.1}') returning id", [i, m])).rows[0].id;
   expect((await c.query("select status from invoices where id=$1", [i])).rows[0].status).toBe("issued");
   await c.query("select record_scheme_remittance($1,80000,'REM-1')", [cl]);
   const r = (await c.query("select status from invoices where id=$1", [i])).rows[0].status;
@@ -50,7 +50,7 @@ it("setup insert order from the brief works for the owner: issued invoice, porti
   const i = (await c.query("insert into invoices(patient_id,number,total_cents,patient_portion_cents,status) values ($1,'INV-1',100000,100000,'issued') returning id", [p])).rows[0].id;
   await c.query("update invoices set scheme_portion_cents=80000, patient_portion_cents=20000 where id=$1", [i]);
   const m = (await c.query("insert into medical_aid_members(patient_id,scheme,member_number) values ($1,'Discovery','123') returning id", [p])).rows[0].id;
-  const cl = (await c.query("insert into claims(invoice_id,member_id,status,claimed_cents) values ($1,$2,'submitted',80000) returning id", [i, m])).rows[0];
+  const cl = (await c.query("insert into claims(invoice_id,member_id,status,claimed_cents,icd10_codes) values ($1,$2,'submitted',80000,'{F41.1}') returning id", [i, m])).rows[0];
   const s = (await c.query("select submitted_at from claims where id=$1", [cl.id])).rows[0];
   expect(s.submitted_at).not.toBeNull(); // stamped even for a direct insert
   await c.query("insert into payments(invoice_id,method,amount_cents,reference) values ($1,'eft',100000,'X')", [i]);

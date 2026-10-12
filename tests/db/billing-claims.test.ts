@@ -159,7 +159,7 @@ it("submitting or accepting a claim never changes the invoice status or paid amo
   expect(await status(c, i)).toBe("part_paid");
   expect(await paid(c, i)).toBe(20000);
   const j = await mkMaInvoice(c, (await c.query("select patient_id from invoices where id=$1", [i])).rows[0].patient_id);
-  const c2 = (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,80000) returning id", [j.i, j.m])).rows[0].id;
+  const c2 = (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents,icd10_codes) values ($1,$2,80000,'{F41.1}') returning id", [j.i, j.m])).rows[0].id;
   await setStatus(c, psy, c2, "submitted");
   await setStatus(c, psy, c2, "accepted");
   expect(await status(c, j.i)).toBe("issued");
@@ -170,7 +170,7 @@ it("submitting or accepting a claim never changes the invoice status or paid amo
 it("claims on one invoice may not add up to more than its scheme portion; rejected claims do not count", () => withClient(async (c) => {
   const { psy, p1 } = await seed(c);
   const { i, m } = await mkMaInvoice(c, p1); // scheme portion 80 000
-  const mk = async (amt: number) => (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,$3) returning id", [i, m, amt])).rows[0].id as string;
+  const mk = async (amt: number) => (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents,icd10_codes) values ($1,$2,$3,'{F41.1}') returning id", [i, m, amt])).rows[0].id as string;
   const a = await mk(50000), b = await mk(30000);
   await expect(mk(1)).rejects.toThrow(/claims_exceed_scheme_portion/);
   await expect(as(c, psy, "update claims set claimed_cents=30001 where id=$1", [b])).rejects.toThrow(/claims_exceed_scheme_portion/);
@@ -197,7 +197,7 @@ it("voiding an invoice is refused while any claim is submitted / accepted / part
   const { psy, p1 } = await seed(c);
   const mkClaim = async () => {
     const { i, m } = await mkMaInvoice(c, p1);
-    return { i, cl: (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,1000) returning id", [i, m])).rows[0].id as string };
+    return { i, cl: (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents,icd10_codes) values ($1,$2,1000,'{F41.1}') returning id", [i, m])).rows[0].id as string };
   };
   for (const st of ["submitted", "accepted"]) {
     const { i, cl } = await mkClaim();
@@ -264,17 +264,20 @@ it("remittance is idempotent on p_ref: a replay changes nothing (no second claim
   await expect(remit(c, psy, claim, 29999, "REM-1")).rejects.toThrow(/ref_conflict/);
 }));
 
-it("remittance ref clashes with another invoice's or claim's payment are ref_conflict", () => withClient(async (c) => {
+// 0020 (deliberate change): a remittance advice number is per claim (stored as <RA>#<claim id>), so the same number may pay several claims and can no longer
+// clash with a PayFast reference; the replay and conflict rules are per claim (tests/db/claims-fixes.test.ts).
+it("the same remittance reference on another claim or invoice is a separate payment; a PayFast reference of the same text is not a clash", () => withClient(async (c) => {
   const { psy, p1, claim } = await setup(c);
   await setStatus(c, psy, claim, "submitted");
   const other = await mkInvoice(c, p1);
   await asService(c, () => c.query("select record_payment($1,'payfast',100,'SHARED',null)", [other]));
-  await expect(remit(c, psy, claim, 100, "SHARED")).rejects.toThrow(/ref_conflict/);
+  await remit(c, psy, claim, 100, "SHARED");
   const j = await mkMaInvoice(c, p1);
-  const c2 = (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,1000) returning id", [j.i, j.m])).rows[0].id;
+  const c2 = (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents,icd10_codes) values ($1,$2,1000,'{F41.1}') returning id", [j.i, j.m])).rows[0].id;
   await setStatus(c, psy, c2, "submitted");
   await remit(c, psy, claim, 100, "R-X");
-  await expect(remit(c, psy, c2, 100, "R-X")).rejects.toThrow(/ref_conflict/);
+  await remit(c, psy, c2, 100, "R-X"); // used to be ref_conflict
+  expect((await c.query("select count(*)::int n from claim_payments where remittance_ref='R-X'")).rows[0].n).toBe(2);
 }));
 
 it("remittance may not exceed the claim; needs a payable claim, a ref, a positive amount; the invoice cannot be overpaid", () => withClient(async (c) => {
@@ -320,7 +323,7 @@ it("remittance: staff only (psychologist, admin, or the service role); audited",
   expect(a[0]).toMatchObject({ actor_id: adm, role: "admin" });
   expect(a[0].detail).toMatchObject({ amount: 100, ref: "R-adm" });
   expect((await c.query("select actor from claim_events where claim_id=$1 and event='remittance' order by id", [claim])).rows[0].actor).toBe(adm);
-  expect((await c.query("select recorded_by from payments where gateway_ref='R-adm'")).rows[0].recorded_by).toBe(adm);
+  expect((await c.query("select recorded_by from payments where gateway_ref like 'R-adm#%'")).rows[0].recorded_by).toBe(adm);
 }));
 
 it("claims_guard binds an untrusted custom role: no paid status, no amount change after submission", () => withClient(async (c) => {
@@ -448,7 +451,7 @@ it("medical_aid_members: staff write; patient/guardian read own; bookkeeper, ass
   for (const [u, who] of [[bk, "bookkeeper"], [assoc, "associate"], [u1, "patient"], [g, "guardian"]] as const) {
     await expect(as(c, u, "insert into medical_aid_members(patient_id,scheme,member_number) values ($1,'Z','9')", [p1]), who).rejects.toThrow(/row-level security/);
     expect((await as(c, u, "update medical_aid_members set scheme='hack'")).rowCount, `${who} update`).toBe(0);
-    expect((await as(c, u, "delete from medical_aid_members")).rowCount, `${who} delete`).toBe(0);
+    await expect(as(c, u, "delete from medical_aid_members"), `${who} delete`).rejects.toThrow(/permission denied/); // 0020: DELETE is revoked for everyone
   }
   expect((await c.query("select 1 from medical_aid_members where scheme='hack'")).rowCount).toBe(0);
   expect((await as(c, psy, "update medical_aid_members set plan='Classic' where id=$1", [m1])).rowCount).toBe(1);

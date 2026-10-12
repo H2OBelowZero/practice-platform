@@ -185,7 +185,7 @@ const ATTACKS: Atk[] = [
   // medical aid and claims
   ["update B's medical aid member", (w) => ["update medical_aid_members set member_number='1' where id=$1", [w.b.member]], 0],
   ["update own medical aid member", (w) => ["update medical_aid_members set member_number='1' where id=$1", [w.a.member]], 0],
-  ["delete B's medical aid member", (w) => ["delete from medical_aid_members where id=$1", [w.b.member]], 0],
+  ["delete B's medical aid member", (w) => ["delete from medical_aid_members where id=$1", [w.b.member]], NOPRIV("medical_aid_members")],
   ["insert a medical aid member for B", (w) => ["insert into medical_aid_members(patient_id,scheme,member_number) values ($1,'S','1')", [w.p2]], RLS("medical_aid_members")],
   ["insert a medical aid member for self", (w) => ["insert into medical_aid_members(patient_id,scheme,member_number) values ($1,'S','1')", [w.p1]], RLS("medical_aid_members")],
   ["update B's claim", (w) => ["update claims set status='rejected' where id=$1", [w.b.claim]], 0],

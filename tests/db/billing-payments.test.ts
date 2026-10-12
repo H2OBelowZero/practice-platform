@@ -36,7 +36,7 @@ it("service role (PayFast ITN): payfast only, ref required, p_by recorded", () =
 it("the service path needs a service_role JWT (or a trusted connection): an untrusted login role without a JWT is forbidden", () => withClient(async (c) => {
   const { psy, p1 } = await seed(c);
   const { i, m } = await mkMaInvoice(c, p1);
-  const cl = (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,1000) returning id", [i, m])).rows[0].id;
+  const cl = (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents,icd10_codes) values ($1,$2,1000,'{F41.1}') returning id", [i, m])).rows[0].id;
   await as(c, psy, "update claims set status='submitted' where id=$1", [cl]);
   await c.query("create role app_y login");
   await c.query("grant authenticated to app_y");
@@ -165,14 +165,15 @@ it("double-submit protection: same invoice, method, amount, reference and date i
   await expect(svc(c, i, 101, "PF-D")).rejects.toThrow(/ref_conflict/);
 }));
 
-it("a gateway ref reused across methods is ref_conflict (remittance ref replayed as payfast)", () => withClient(async (c) => {
+// 0020 (deliberate change): the stored remittance reference is <RA>#<claim id>, so a PayFast payment with the same plain text is a different reference
+it("a remittance advice number and a PayFast reference of the same text do not clash", () => withClient(async (c) => {
   const { psy, p1 } = await seed(c);
   const { i, m } = await mkMaInvoice(c, p1);
-  const cl = (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents) values ($1,$2,1000) returning id", [i, m])).rows[0].id;
+  const cl = (await as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents,icd10_codes) values ($1,$2,1000,'{F41.1}') returning id", [i, m])).rows[0].id;
   await as(c, psy, "update claims set status='submitted' where id=$1", [cl]);
   await as(c, psy, "select record_scheme_remittance($1,500,'GW-1')", [cl]);
-  await expect(svc(c, i, 500, "GW-1")).rejects.toThrow(/ref_conflict/);
-  expect(await paid(c, i)).toBe(500);
+  await svc(c, i, 500, "GW-1");
+  expect(await paid(c, i)).toBe(1000);
 }));
 
 // ---- manual payment details ---------------------------------------------------------------------------------------
