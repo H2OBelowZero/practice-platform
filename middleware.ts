@@ -4,7 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 const PROTECTED = ["/app", "/portal"];
 const isProtected = (p: string) => PROTECTED.some((x) => p === x || p.startsWith(x + "/"));
 
-/** (The PayFast webhook /api/payfast/* is excluded in the matcher below: no session, no Auth round trip.)
+/** (The PayFast webhook /api/payfast/* and the cron route /api/cron/* are excluded in the matcher below: no session, no Auth round trip.)
  *  Refreshes the Supabase session cookie and sends anonymous visitors from /app and /portal to /login.
  *  Role and MFA checks happen in the pages via requireRole/requireUser (the real gate); this is a cheap first filter. */
 export async function middleware(request: NextRequest) {
@@ -38,5 +38,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api/payfast/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
+  matcher: ["/((?!api/payfast/|api/cron/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
 };
