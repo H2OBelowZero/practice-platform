@@ -98,7 +98,7 @@ export default async function StaffAppointmentPage({ params, searchParams }: { p
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <h3 className="mb-2 text-lg">Confirm this request</h3>
-              <p className="mb-4 text-ink-muted">The patient is emailed a short confirmation (date, time and a link).</p>
+              <p className="mb-4 text-ink-muted">A short confirmation (date, time and a link) is queued for the patient by email.</p>
               <ActionButton action={confirmAppointment} args={[appt.id]} submitLabel="Confirm appointment" pendingLabel="Confirming…" />
             </Card>
             <Card>
@@ -137,7 +137,7 @@ export default async function StaffAppointmentPage({ params, searchParams }: { p
         {(st === "confirmed" || open) && (
           <Card className="mt-4">
             <h3 className="mb-2 text-lg">Cancel this appointment</h3>
-            <p className="mb-4 text-ink-muted">The patient is emailed that it was cancelled.{fee > 0 ? " No fee is charged unless you tick the box." : ""}</p>
+            <p className="mb-4 text-ink-muted">An email telling the patient it was cancelled is queued.{fee > 0 ? " No fee is charged unless you tick the box." : ""}</p>
             <ActionForm action={cancelAppointmentStaff} args={[appt.id]} submitLabel="Cancel appointment" pendingLabel="Cancelling…" variant="danger">
               <Textarea id="cancel-reason" name="reason" label="Reason (optional)" rows={2} maxLength={500} hint="The patient may see this." />
               {fee > 0 && <div className="mb-5 flex items-start gap-3">

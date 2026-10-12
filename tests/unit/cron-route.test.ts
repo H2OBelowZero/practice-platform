@@ -13,13 +13,13 @@ const call = (method: "GET" | "POST", auth?: string) => (method === "GET" ? GET 
 const good = `Bearer ${SECRET}`;
 
 /** A fake database for the real worker: nothing to send unless a test says so. */
-function db(o: { claim?: unknown[]; error?: Record<string, string>; auditError?: boolean } = {}) {
+function db(o: { claim?: unknown[]; error?: Record<string, string>; auditError?: boolean; quiet?: boolean } = {}) {
   h.rpc.mockImplementation(async (fn: string) => {
     if (o.error?.[fn]) return { data: null, error: { code: o.error[fn], message: "secret db text" } };
-    if (fn === "enqueue_reminders") return { data: 2, error: null };
-    if (fn === "enqueue_overdue_tasks") return { data: 1, error: null };
+    if (fn === "enqueue_reminders") return { data: o.quiet ? 0 : 2, error: null };
+    if (fn === "enqueue_overdue_tasks") return { data: o.quiet ? 0 : 1, error: null };
     if (fn === "claim_outbox") { const rows = o.claim ?? []; o.claim = []; return { data: rows, error: null }; }
-    if (fn === "finish_outbox") return { data: null, error: null };
+    if (fn === "finish_outbox" || fn === "release_outbox") return { data: null, error: null };
     if (fn === "audit_append") return o.auditError ? { data: null, error: { code: "42501", message: "no" } } : { data: null, error: null };
     throw new Error("unexpected " + fn);
   });
@@ -129,6 +129,49 @@ describe("a run", () => {
   });
 });
 
+describe("providers and quiet runs", () => {
+  const prod = () => { vi.stubEnv("NODE_ENV", "production"); vi.stubEnv("EMAIL_API_KEY", ""); vi.stubEnv("EMAIL_FROM", ""); };
+
+  it("production without an email provider: queues, but claims and sends nothing, and says why", async () => {
+    prod();
+    db({ claim: [{ id: 5, channel: "email", template: "invoice_issued", recipient: "jane@example.test", attempts: 1, payload: { link: "/portal/payments" } }] });
+    const r = await call("GET", good);
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ ok: true, reminders: 2, overdueTasks: 1, claimed: 0, sent: 0, skipped: "provider_not_configured", emailProvider: "none" });
+    expect(h.rpc.mock.calls.map((c) => c[0])).toEqual(["enqueue_reminders", "enqueue_overdue_tasks", "audit_append"]);
+    expect(h.rpc.mock.calls.some((c) => c[0] === "claim_outbox" || c[0] === "finish_outbox")).toBe(false);
+  });
+  it("development without a provider uses the console provider and claims email rows", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    db();
+    const r = await call("GET", good);
+    expect(await r.json()).toMatchObject({ emailProvider: "console" });
+    expect(h.rpc.mock.calls.find((c) => c[0] === "claim_outbox")![1]).toEqual({ p_limit: 25, p_channels: ["email"] });
+  });
+  it("SMS_ACTIVE=true queues and claims sms as well; otherwise p_sms is false", async () => {
+    db({ quiet: true });
+    await call("GET", good);
+    expect(h.rpc.mock.calls[0]).toEqual(["enqueue_reminders", { p_sms: false }]);
+    h.rpc.mockReset(); db({ quiet: true });
+    vi.stubEnv("SMS_ACTIVE", "true");
+    await call("GET", good);
+    expect(h.rpc.mock.calls[0]).toEqual(["enqueue_reminders", { p_sms: true }]);
+    expect(h.rpc.mock.calls.find((c) => c[0] === "claim_outbox")![1].p_channels).toEqual(["email", "sms"]);
+  });
+  it("a quiet run (nothing queued, nothing claimed, no error) writes NO audit row; any activity or error does", async () => {
+    db({ quiet: true });
+    expect((await call("GET", good)).status).toBe(200);
+    expect(h.rpc.mock.calls.some((c) => c[0] === "audit_append")).toBe(false);
+    h.rpc.mockReset(); prod(); db({ quiet: true });
+    await call("GET", good);
+    expect(h.rpc.mock.calls.some((c) => c[0] === "audit_append")).toBe(false); // "skipped" alone is not activity
+    h.rpc.mockReset(); db({ quiet: true, error: { claim_outbox: "XX000" } });
+    vi.stubEnv("NODE_ENV", "test");
+    await call("GET", good);
+    expect(h.rpc.mock.calls.some((c) => c[0] === "audit_append")).toBe(true);
+  });
+});
+
 describe("wiring", () => {
   const root = join(__dirname, "..", "..");
   it("vercel.json schedules the route every 15 minutes", () => {
@@ -169,14 +212,16 @@ describe("rpc call sites match the SQL signatures (R34)", () => {
     const body = src.slice(at, src.indexOf(");", at));
     return [...body.matchAll(/\b(p_[a-z_]+)\s*:/g)].map((m) => m[1]);
   };
-  it("claim_outbox, finish_outbox", () => {
+  it("claim_outbox, finish_outbox, release_outbox, enqueue_reminders", () => {
     expect(keys(worker, "claim_outbox").sort()).toEqual(sqlParams("claim_outbox").sort());
     expect(keys(worker, "finish_outbox").sort()).toEqual(sqlParams("finish_outbox").sort());
+    expect(keys(worker, "release_outbox").sort()).toEqual(sqlParams("release_outbox").sort());
+    expect(keys(worker, "enqueue_reminders").sort()).toEqual(sqlParams("enqueue_reminders").sort());
+    expect(sqlParams("claim_outbox")).toEqual(["p_limit", "p_channels"]);
+    expect(sqlParams("enqueue_reminders")).toEqual(["p_sms"]);
   });
-  it("enqueue_reminders and enqueue_overdue_tasks take no parameters", () => {
-    expect(sqlParams("enqueue_reminders")).toEqual([]);
+  it("enqueue_overdue_tasks takes no parameters", () => {
     expect(sqlParams("enqueue_overdue_tasks")).toEqual([]);
-    expect(worker).toMatch(/rpc\("enqueue_reminders"\)/);
     expect(worker).toMatch(/rpc\("enqueue_overdue_tasks"\)/);
   });
   it("audit_append", () => {

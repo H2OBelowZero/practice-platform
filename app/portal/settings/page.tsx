@@ -1,13 +1,11 @@
 import { requireRole } from "@/lib/auth/session";
-import { SMS_ACTIVE } from "@/lib/notify/provider";
+import { smsActive } from "@/lib/notify/provider";
 import { prefsNotice, readPrefs } from "@/lib/portal/prefs";
 import { supabaseServer } from "@/lib/supabase/server";
-import { ActionForm } from "@/components/ui/action-form";
 import { Card } from "@/components/ui/card";
 import { Notice } from "@/components/ui/notice";
 import { PageHeader } from "@/components/ui/page-header";
-import { Switch } from "@/components/ui/switch";
-import { updatePrefs } from "./actions";
+import { PrefsForm } from "./prefs-form";
 
 export const metadata = { title: "Settings" };
 
@@ -35,14 +33,7 @@ export default async function PortalSettings({ searchParams }: { searchParams: P
           <Card className="mb-6">
             <h2 className="mb-1">Reminders</h2>
             <p className="text-ink-muted">We send one reminder about a day before each appointment. Reminders only give the date and time and a link; they never include anything private.</p>
-            <ActionForm action={updatePrefs} args={[]} submitLabel="Save my choices" pendingLabel="Saving…" className="mt-2">
-              <div className="divide-y divide-line">
-                <Switch id="pref-email" name="email" label="Email reminders" hint="Sent to the email address we have for you." defaultChecked={prefs.email} />
-                <Switch id="pref-sms" name="sms" label="SMS reminders" defaultChecked={prefs.sms}
-                        hint={SMS_ACTIVE ? "Sent to the cellphone number we have for you." : "SMS reminders are not active yet. Your choice is saved for when they are."} />
-              </div>
-              <div className="pt-4" />
-            </ActionForm>
+            <PrefsForm initial={prefs} smsHint={smsActive() ? "Sent to the cellphone number we have for you." : "SMS reminders are not active yet. Your choice is saved for when they are."} />
           </Card>
 
           <Card>

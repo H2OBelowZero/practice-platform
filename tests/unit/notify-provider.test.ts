@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ConsoleProvider, ProviderError, ResendEmailProvider, emailProviderName, getProvider } from "@/lib/notify/provider";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { ConsoleProvider, ProviderError, ResendEmailProvider, emailProviderName, getProvider, smsActive } from "@/lib/notify/provider";
 
 const MSG = { subject: "Appointment reminder", text: "You have an appointment on Mon 7 Jan 2030 at 08:00.", html: "<p>hi</p>" };
 const TO = "jane.private@example.test";
@@ -77,25 +77,41 @@ describe("ResendEmailProvider", () => {
 });
 
 describe("getProvider", () => {
-  let env: NodeJS.ProcessEnv;
-  beforeEach(() => { env = {} as NodeJS.ProcessEnv; });
+  const env = (o: Record<string, string> = {}) => o as unknown as NodeJS.ProcessEnv;
 
-  it("email uses Resend when EMAIL_API_KEY and EMAIL_FROM are both set, otherwise the console", () => {
-    expect(getProvider("email", env)).toBeInstanceOf(ConsoleProvider);
-    expect(emailProviderName(env)).toBe("console");
-    env.EMAIL_API_KEY = "k"; env.EMAIL_FROM = "bookings@example.test";
-    expect(getProvider("email", env)).toBeInstanceOf(ResendEmailProvider);
-    expect(emailProviderName(env)).toBe("resend");
+  it("email uses Resend when EMAIL_API_KEY and EMAIL_FROM are both set", () => {
+    const e = env({ EMAIL_API_KEY: "k", EMAIL_FROM: "bookings@example.test", NODE_ENV: "production" });
+    expect(getProvider("email", e)).toBeInstanceOf(ResendEmailProvider);
+    expect(emailProviderName(e)).toBe("resend");
   });
-  it("a key without a sender fails (visible failed rows) instead of quietly logging real email", () => {
-    env.EMAIL_API_KEY = "k";
-    expect(() => getProvider("email", env)).toThrow(/provider_misconfigured/);
-    env.EMAIL_FROM = "   ";
-    expect(() => getProvider("email", env)).toThrow(/provider_misconfigured/);
+  it("outside production with nothing configured the console is used (local runs show activity)", () => {
+    for (const NODE_ENV of ["development", "test", ""]) {
+      expect(emailProviderName(env({ NODE_ENV })), NODE_ENV).toBe("console");
+      expect(getProvider("email", env({ NODE_ENV }))).toBeInstanceOf(ConsoleProvider);
+    }
+  });
+  it("in production with nothing configured there is NO email provider: it never falls back to the console", () => {
+    const e = env({ NODE_ENV: "production" });
+    expect(emailProviderName(e)).toBe("none");
+    expect(() => getProvider("email", e)).toThrow(/provider_not_configured/);
+  });
+  it("a key without a sender is not configured anywhere (half-finished setup)", () => {
+    for (const NODE_ENV of ["production", "development"]) {
+      for (const extra of [{} as Record<string, string>, { EMAIL_FROM: "   " }]) {
+        const e = env({ NODE_ENV, EMAIL_API_KEY: "k", ...extra });
+        expect(emailProviderName(e)).toBe("none");
+        expect(() => getProvider("email", e)).toThrow(/provider_not_configured/);
+      }
+    }
   });
   it("SMS and push are always the console in Phase 1, even with email configured", () => {
-    env.EMAIL_API_KEY = "k"; env.EMAIL_FROM = "bookings@example.test";
-    expect(getProvider("sms", env)).toBeInstanceOf(ConsoleProvider);
-    expect(getProvider("push", env)).toBeInstanceOf(ConsoleProvider);
+    const e = env({ EMAIL_API_KEY: "k", EMAIL_FROM: "bookings@example.test", NODE_ENV: "production" });
+    expect(getProvider("sms", e)).toBeInstanceOf(ConsoleProvider);
+    expect(getProvider("push", e)).toBeInstanceOf(ConsoleProvider);
+    expect(getProvider("sms", env({ NODE_ENV: "production" }))).toBeInstanceOf(ConsoleProvider);
+  });
+  it("SMS is active only for SMS_ACTIVE exactly 'true'", () => {
+    expect(smsActive(env({ SMS_ACTIVE: "true" }))).toBe(true);
+    for (const v of [undefined, "", "TRUE", "1", "yes", "false"]) expect(smsActive(env(v === undefined ? {} : { SMS_ACTIVE: v })), String(v)).toBe(false);
   });
 });

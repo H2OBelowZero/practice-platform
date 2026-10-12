@@ -57,16 +57,33 @@ export class ResendEmailProvider implements Provider {
   }
 }
 
-/** True once a real SMS provider exists. Phase 1 has none: SMS rows are logged only, and the portal says so. */
-export const SMS_ACTIVE = false;
+/**
+ * SMS is switched on only by SMS_ACTIVE=true, and that must be set only once a real SMS provider is wired in (Phase 1 has none: the SMS provider is the
+ * console one, which delivers nothing). While it is off no SMS reminder rows are queued and any SMS rows already queued are never claimed.
+ */
+export const smsActive = (env: NodeJS.ProcessEnv = process.env): boolean => env.SMS_ACTIVE === "true";
 
-/** Which email provider is configured: "resend" when EMAIL_API_KEY and EMAIL_FROM are both set, otherwise "console" (logs only, nothing is delivered). */
-export const emailProviderName = (env: NodeJS.ProcessEnv = process.env): "resend" | "console" =>
-  env.EMAIL_API_KEY?.trim() && env.EMAIL_FROM?.trim() ? "resend" : "console";
+export type EmailProviderName = "resend" | "console" | "none";
+
+/**
+ * Which email provider is usable:
+ *  - "resend" when EMAIL_API_KEY and EMAIL_FROM are both set;
+ *  - "none" when a key is set without a sender (half-finished setup), or in production with nothing set: the worker then sends NOTHING and leaves the rows
+ *    pending (it never pretends that an email was delivered);
+ *  - "console" only outside production with nothing set (local runs show activity in the log; nothing is delivered).
+ */
+export function emailProviderName(env: NodeJS.ProcessEnv = process.env): EmailProviderName {
+  const key = env.EMAIL_API_KEY?.trim(), from = env.EMAIL_FROM?.trim();
+  if (key && from) return "resend";
+  if (key) return "none";
+  return env.NODE_ENV === "production" ? "none" : "console";
+}
 
 export function getProvider(channel: Channel, env: NodeJS.ProcessEnv = process.env): Provider {
-  // a key without a sender is a half-finished setup: fail the sends (visible as failed rows) instead of silently dropping real email into the log
-  if (channel === "email" && env.EMAIL_API_KEY?.trim() && !env.EMAIL_FROM?.trim()) throw new ProviderError("provider_misconfigured");
-  if (channel === "email" && emailProviderName(env) === "resend") return new ResendEmailProvider(env.EMAIL_API_KEY!.trim(), env.EMAIL_FROM!.trim());
+  if (channel === "email") {
+    const name = emailProviderName(env);
+    if (name === "none") throw new ProviderError("provider_not_configured");
+    if (name === "resend") return new ResendEmailProvider(env.EMAIL_API_KEY!.trim(), env.EMAIL_FROM!.trim());
+  }
   return new ConsoleProvider();
 }

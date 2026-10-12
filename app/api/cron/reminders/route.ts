@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase/service";
-import { runWorker, type Rpc } from "@/lib/notify/worker";
+import { runWorker, somethingHappened, type Rpc } from "@/lib/notify/worker";
 
 // Scheduled job (Vercel cron -> us): no session, so no requireRole. The only credential is CRON_SECRET, sent as `Authorization: Bearer <secret>`
 // (Vercel adds it automatically when the variable is set). Responses are counts and short codes only: no recipients, no message content.
@@ -38,8 +38,9 @@ async function run(req: Request) {
   try {
     const rpc = serviceRpc();
     result = await runWorker({ rpc });
-    // one audit row per run: counts and codes only (R25: audit_append is service-role only; there is no signed-in user, so the actor is empty)
-    const audited = await rpc("audit_append", { p_actor: null, p_role: "system", p_action: "cron.reminders.run", p_entity: null, p_entity_id: null, p_detail: result });
+    // one audit row per run in which something happened (a count above zero or an error): counts and codes only, so a quiet 15 minute run leaves no
+    // row. R25: audit_append is service-role only; there is no signed-in user, so the actor is empty.
+    const audited = !somethingHappened(result) ? { error: null } : await rpc("audit_append", { p_actor: null, p_role: "system", p_action: "cron.reminders.run", p_entity: null, p_entity_id: null, p_detail: result });
     if (audited.error) { result.errors.push(`audit_append:${audited.error.code}`); result.ok = false; }
   } catch (e) {
     console.error("cron reminders failed:", e instanceof Error ? e.name : "unknown");

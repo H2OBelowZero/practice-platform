@@ -18,7 +18,7 @@ export function inviteBlock(p: InviteSubject, today: string): string | null {
 /** Plain-language text for an error raised by invite_patient() (0011). Anything else is the generic failure. */
 export function inviteErrorText(message: string | undefined): string {
   const m = message ?? "";
-  if (m.includes("invite_too_soon")) return "An invitation was sent a moment ago. Please wait 10 minutes before sending another.";
+  if (m.includes("invite_too_soon")) return "An invitation was queued a moment ago. Please wait 10 minutes before inviting again.";
   if (m.includes("already_registered")) return "This patient already has a portal account.";
   if (m.includes("patient_archived")) return "Restore this patient before inviting them.";
   if (m.includes("patient_minor")) return "This patient is a minor. Minors do not get their own portal login: a parent or guardian is linked to the record instead.";

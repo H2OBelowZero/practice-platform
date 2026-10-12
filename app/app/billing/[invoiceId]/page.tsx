@@ -202,7 +202,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
           <p className="mb-4 text-ink-muted">{inv.total_cents === 0 ? "The total is R 0,00, so it cannot be issued yet. Add an amount to a line first." : "Check the lines and totals above first."}</p>
           <KeepForm action={issueInvoice} args={[inv.id]} submitLabel="Issue invoice" pendingLabel="Issuing…"
             confirm={{ title: `Issue invoice ${inv.number}?`, yes: "Yes, issue this invoice",
-              body: <p>Issuing cannot be undone: the lines and amounts are frozen, today becomes the issue date, and the patient is emailed a link to their payments page if they have an email address and agreed to email. A mistake afterwards means voiding the invoice or adding a credit note.</p> }} />
+              body: <p>Issuing cannot be undone: the lines and amounts are frozen, today becomes the issue date, and an email with a link to their payments page is queued for the patient if they have an email address and agreed to email. A mistake afterwards means voiding the invoice or adding a credit note.</p> }} />
         </Card>
       )}
 

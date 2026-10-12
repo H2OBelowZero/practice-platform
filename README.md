@@ -163,17 +163,24 @@ and billing code). A scheduled worker sends the rows; nothing is sent inside a u
 
 - **Route**: `GET` (or `POST`) `/api/cron/reminders` (`app/api/cron/reminders/route.ts`, worker in `lib/notify/worker.ts`). One run: queue the 24 hour
   reminders (`enqueue_reminders()`), raise a staff task for each overdue invoice (`enqueue_overdue_tasks()`), then claim due rows in batches of 25
-  (at most 4 batches, 20 second budget), render, send and record each one (`claim_outbox()` / `finish_outbox()`, migration 0022). A row is tried at
-  most 3 times (10 and 20 minute backoff) and then marked `failed`; the failure is a short code in `last_error`, never a provider reply. A crashed run's
+  (at most 4 batches, 20 second budget), render, send and record each one (`claim_outbox()` / `finish_outbox()`, migrations 0022 and 0023). A row is tried at
+  most 3 times (10 and 20 minute backoff) and then marked `failed` (a short code in `last_error`, never a provider reply) and ONE staff task
+  "Notification could not be sent" is raised (the template and channel are in the task's meta, no recipient). A run that runs out of time hands the
+  remaining rows back without using up an attempt (`release_outbox`). A crashed run's
   rows are claimed again after 10 minutes, and two overlapping runs never take the same row (`FOR UPDATE SKIP LOCKED`).
-- **Response and logs**: counts and short codes only (no recipients, no content). One `cron.reminders.run` audit row per run (counts, no personal data).
-  `emailProvider` in the response says whether email really goes out (`resend`) or is only logged (`console`).
+- **Response and logs**: counts and short codes only (no recipients, no content). One `cron.reminders.run` audit row per run in which something happened
+  (a count above zero or an error; quiet 15 minute runs leave none; counts, no personal data). `emailProvider` in the response is `resend`, `console`
+  (development only, nothing is delivered) or `none`; with `none` the response says `skipped: "provider_not_configured"`.
+- **No provider, nothing sent**: in production without `EMAIL_API_KEY` and `EMAIL_FROM` the worker still queues reminders and tasks but does NOT claim or send
+  email rows (they stay pending), and logs one fixed line. Rows that become stale while waiting are expired by `claim_outbox` (`failed`, `last_error` =
+  `expired`, no task) instead of being sent late: reminders for an appointment that is no longer confirmed or has started, reminders more than 2 hours past
+  their send time, and booking/cancel/reschedule emails older than 48 hours. Switching a provider on days later therefore does not email old reminders.
 - **Reminders**: confirmed appointments starting 23 to 25 hours from now, for patients whose reminder choice (`patients.comms_prefs`, set on
-  `/portal/settings`) is on and who have the contact detail. One per appointment and channel (`dedupe_key`), so the 15 minute schedule never repeats one.
+  `/portal/settings`) is on and who have the contact detail (archived patients get none). One per appointment and channel (`dedupe_key`), so the 15 minute schedule never repeats one.
   The message holds the date and time (South African time) and a link; the worker adds `APP_URL` in front of the stored path.
 - **Overdue invoices**: one staff task per invoice, ever ("Overdue invoice: follow up", no names), linked to the invoice on the tasks page.
 - **Message privacy** (`lib/notify/templates.ts`, `tests/unit/templates.test.ts`): subjects are fixed text, bodies hold only a date, a time and one link;
-  no names, amounts, invoice numbers, form names or clinical words; every email ends with the emergency footer. A link is sent only if it is a path on this
+  no names, amounts, invoice numbers, form names or clinical words; every email ends with the same footer (the generic emergency line "call 10177 or go to the nearest emergency room", no support-group names, so an email never hints at mental-health context). A link is sent only if it is a path on this
   app or already on `APP_URL`'s origin; any other link makes the row fail (`bad_link`) instead of being sent.
 
 Environment variables:
@@ -181,13 +188,14 @@ Environment variables:
 | Variable | Notes |
 | --- | --- |
 | `CRON_SECRET` | **Required.** A long random value (for example `openssl rand -hex 32`). The route answers 500 `misconfigured` when it is not set and 401 for anything but `Authorization: Bearer <CRON_SECRET>` (compared in constant time). When this variable is set on Vercel, Vercel sends that header on every scheduled call by itself. |
-| `EMAIL_API_KEY`, `EMAIL_FROM` | Set both to send real email. Without them email is only logged (outbox id, template and channel; never the address or text), the rows are still marked sent, and `emailProvider` in the response says `console`. A key without a sender fails every send (`provider_misconfigured`) so it is noticed. `EMAIL_FROM` is the verified sender, for example `Bookings <bookings@yourdomain.co.za>`. |
+| `EMAIL_API_KEY`, `EMAIL_FROM` | Set both to send real email. In production, without both, nothing is sent and email rows stay pending (see above); a key without a sender counts as not configured. Outside production, with neither set, a console provider logs only the outbox id, template and channel (never the address or text) and the rows are marked sent. `EMAIL_FROM` is the verified sender, for example `Bookings <bookings@yourdomain.co.za>`. |
+| `SMS_ACTIVE` | `true` only once a real SMS provider is wired in (Phase 1 has none). While it is not `true`, no SMS reminder rows are queued and any SMS rows are never claimed. |
 | `APP_URL` | Origin put in front of emailed links. Required in production. |
 
 **The email provider is a placeholder choice.** `lib/notify/provider.ts` ships a Resend adapter (`https://api.resend.com/emails`, 8 second timeout) only so
 that the worker is complete; **the practice owner must confirm the provider.** Another service needs only another class with the same `send()` method. SMS and
-push use a console provider in Phase 1: SMS reminders are queued when a patient turns them on, but nothing is delivered, and the settings page says "SMS
-reminders are not active yet". **POPIA**: whichever email (or SMS) service is used processes personal information (addresses, appointment times) for the
+push use a console provider in Phase 1: SMS reminders are neither queued nor sent while `SMS_ACTIVE` is not `true`, and the settings page says "SMS
+reminders are not active yet". A patient's email address and phone number can only be changed by staff (database guard), so reminders cannot be redirected. **POPIA**: whichever email (or SMS) service is used processes personal information (addresses, appointment times) for the
 practice, so a written operator agreement under section 21 of POPIA must be signed with it, and where its servers are (cross-border transfer, section 72)
 recorded, before live use. Keep message content as neutral as it is now.
 

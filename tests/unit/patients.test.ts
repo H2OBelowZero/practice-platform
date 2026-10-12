@@ -216,7 +216,7 @@ describe("fix round 1", () => {
   });
 
   it("invite errors map to plain language", () => {
-    expect(inviteErrorText("invite_too_soon")).toBe("An invitation was sent a moment ago. Please wait 10 minutes before sending another.");
+    expect(inviteErrorText("invite_too_soon")).toBe("An invitation was queued a moment ago. Please wait 10 minutes before inviting again.");
     expect(inviteErrorText("... patient_minor ...")).toMatch(/guardian/);
     expect(inviteErrorText("no_email")).toMatch(/email/);
     expect(inviteErrorText("syntax error at or near")).toBe("We could not send the invitation. Please try again.");

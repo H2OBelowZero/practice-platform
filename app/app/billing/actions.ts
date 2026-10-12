@@ -84,7 +84,7 @@ export async function saveDraft(rawId: unknown, values: Values): Promise<ActionS
   return detail(id.data, "saved");
 }
 
-/** draft -> issued. The database checks the portions and the total, stamps issue_date and audits it; then the patient is emailed a link. */
+/** draft -> issued. The database checks the portions and the total, stamps issue_date and audits it; then an email with a link is queued for the patient. */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function issueInvoice(rawId: unknown, _values?: Values): Promise<ActionState> { // _values: submitted by the confirmation form, unused
   await requireRole([...WRITERS]);

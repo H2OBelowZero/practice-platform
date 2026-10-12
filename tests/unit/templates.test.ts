@@ -75,11 +75,19 @@ describe("rendered messages", () => {
   });
   it("every email ends with the same plain-text footer (emergency numbers, no personal information in replies)", () => {
     expect(FOOTER).toBe("This message was sent by your practice's booking system. Do not reply with personal or health information. " +
-      "If this is an emergency, call 10177 or go to the nearest emergency room, or call SADAG 0800 567 567.");
+      "If this is an emergency, call 10177 or go to the nearest emergency room.");
     for (const n of TEMPLATE_NAMES.filter((x) => !x.endsWith("_sms"))) {
       const m = render(n);
       expect(m.text.endsWith(FOOTER), n).toBe(true);
       expect(m.html, n).toContain("10177");
+    }
+  });
+  it("emails carry no mental-health context at all: the emergency footer names no support group (SADAG stays in the portal), and nothing else does either", () => {
+    for (const n of TEMPLATE_NAMES) {
+      const m = render(n);
+      expect(`${m.subject}
+${m.text}
+${m.html ?? ""}`, n).not.toMatch(/sadag|depress|anxiety|mental|0800|counsel|psycholog|therap/i);
     }
   });
   it("the SMS has no footer and no html, and fits the length cap", () => {
@@ -90,7 +98,7 @@ describe("rendered messages", () => {
   });
 
   // Words that would reveal the nature of the practice or a person's health to whoever glances at an inbox. The footer is checked separately
-  // (it must mention the emergency lines, one of which is the Depression and Anxiety Group).
+  // (it holds the generic emergency line and the words "health information").
   const FORBIDDEN = /therap|session|diagnos|psycholog|psychiat|mental|counsel|depress|anxi|treat|clinic|medic|patient|health|illness|disorder|trauma|suicid|self.?harm|\bnotes?\b|hpcsa|icd|prescri|\bdr\.?\s|invoice no|R\s?\d/i;
   it("no subject or body contains a clinical word, a title, an amount or an invoice number (footer excluded)", () => {
     for (const n of TEMPLATE_NAMES) {

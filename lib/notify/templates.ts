@@ -16,7 +16,7 @@ export class TemplateError extends Error {
 
 export const FOOTER =
   "This message was sent by your practice's booking system. Do not reply with personal or health information. " +
-  "If this is an emergency, call 10177 or go to the nearest emergency room, or call SADAG 0800 567 567.";
+  "If this is an emergency, call 10177 or go to the nearest emergency room.";
 
 export const SUBJECT_MAX = 78;
 export const TEXT_MAX = 1000;

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { changedFields, mergePrefs, parsePrefsInput, prefsNotice, readPrefs } from "@/lib/portal/prefs";
 import { portalNav } from "@/lib/nav";
+import { Switch } from "@/components/ui/switch";
 
 // Pure parts first, then the page and the action with a fake "RLS-filtered" Supabase client (whatever is in h.db is what the signed-in user may read).
 const h = vi.hoisted(() => ({
@@ -181,6 +182,53 @@ describe("updatePrefs", () => {
     h.requireRole.mockRejectedValue(new Error("NEXT_NOT_FOUND"));
     expect(await run({ email: "on" })).toBe("NEXT_NOT_FOUND");
     expect(h.updates).toHaveLength(0);
+  });
+});
+
+describe("Switch (accessibility)", () => {
+  it("the drawn track shows a 3px focus ring in the focus colour when the invisible input has keyboard focus", () => {
+    const out = renderToStaticMarkup(<Switch id="x" name="x" label="Email reminders" hint="h" defaultChecked />);
+    const track = /<span aria-hidden="true" class="([^"]*relative h-7 w-12[^"]*)"/.exec(out)![1];
+    for (const c of ["peer-focus-visible:outline-3", "peer-focus-visible:outline-offset-2", "peer-focus-visible:outline-blue-700"]) expect(track, c).toContain(c);
+    // the existing look is kept: checked and disabled styles
+    for (const c of ["peer-checked:bg-sage-700", "peer-checked:after:translate-x-5", "peer-disabled:opacity-50", "motion-reduce:transition-none"]) expect(track, c).toContain(c);
+    // the focus colour is the same token the global focus ring uses
+    const css = readFileSync(join(__dirname, "..", "..", "app", "globals.css"), "utf8");
+    expect(css).toMatch(/--focus:\s*var\(--color-blue-700\)/);
+    expect(css).toMatch(/--color-blue-700:/);
+  });
+  it("the input is a real focusable checkbox switch (not display:none) with its label and hint wired up", () => {
+    const out = renderToStaticMarkup(<Switch id="x" name="x" label="Email reminders" hint="h" />);
+    expect(out).toMatch(/<input id="x"[^>]*type="checkbox" role="switch"[^>]*aria-describedby="x-hint"[^>]*class="peer absolute inset-0[^"]*opacity-0/);
+    expect(out).not.toMatch(/display:\s*none|hidden[^"]*peer absolute|sr-only/);
+    expect(out).toContain('<label for="x"');
+  });
+  it("controlled use (checked + onChange) renders the same switch", () => {
+    const out = renderToStaticMarkup(<Switch id="x" name="x" label="L" checked onChange={() => {}} />);
+    expect(out).toMatch(/<input[^>]*role="switch"[^>]*checked=""/);
+  });
+});
+
+describe("settings form keeps the user's choices after a failed save", () => {
+  it("the page uses the client PrefsForm whose switches are controlled by component state (a plain form would be reset to the stored values)", () => {
+    const dir = join(__dirname, "..", "..", "app", "portal", "settings");
+    const page = readFileSync(join(dir, "page.tsx"), "utf8");
+    const form = readFileSync(join(dir, "prefs-form.tsx"), "utf8");
+    expect(page).toContain("<PrefsForm");
+    expect(form.startsWith('"use client"')).toBe(true);
+    expect(form).toMatch(/useState\(initial.email\)/);
+    expect(form).toMatch(/useState\(initial.sms\)/);
+    expect(form).toMatch(/checked=\{email\} onChange=\{setEmail\}/);
+    expect(form).toMatch(/checked=\{sms\} onChange=\{setSms\}/);
+    expect(form).not.toMatch(/defaultChecked/);
+  });
+  it("the SMS hint follows SMS_ACTIVE", async () => {
+    vi.stubEnv("SMS_ACTIVE", "true");
+    try {
+      const out = await render();
+      expect(out).toContain("Sent to the cellphone number we have for you.");
+      expect(out).not.toContain("SMS reminders are not active yet.");
+    } finally { vi.unstubAllEnvs(); }
   });
 });
 
