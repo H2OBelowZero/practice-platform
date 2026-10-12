@@ -6,6 +6,7 @@ import { AdministrativeTab } from "./tab-administrative";
 import { AuditTab } from "./tab-audit";
 import { BillingTab } from "./tab-billing";
 import { FormsTab } from "./tab-forms";
+import { MedicalAidTab } from "./tab-medical-aid";
 import { NotesTab } from "./tab-notes";
 import { ProfileTab } from "./tab-profile";
 
@@ -25,6 +26,7 @@ export const PATIENT_TABS: PatientTab[] = [
   { key: "notes", label: "Clinical notes", roles: ["psychologist"], render: NotesTab },
   { key: "forms", label: "Consent & forms", roles: ["psychologist", "admin"], render: FormsTab },
   { key: "billing", label: "Billing", roles: ["psychologist", "admin"], render: BillingTab },
+  { key: "medical-aid", label: "Medical aid", roles: ["psychologist", "admin"], render: MedicalAidTab },
   { key: "audit", label: "Audit", roles: ["psychologist"], render: AuditTab },
 ];
 
