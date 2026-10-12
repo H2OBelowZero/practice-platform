@@ -93,8 +93,9 @@ it("part_paid and paid are reachable only through record_scheme_remittance", () 
   await remit(c, psy, claim, 10000, "R1");
   expect(await cs(c, claim)).toBe("part_paid");
   await expect(setStatus(c, psy, claim, "paid")).rejects.toThrow(/invalid_claim_transition/);
-  await expect(setStatus(c, psy, claim, "draft")).rejects.toThrow(/invalid_claim_transition/);
-  await expect(setStatus(c, psy, claim, "rejected", ", rejection_reason='x'")).rejects.toThrow(/invalid_claim_transition/);
+  // 0021 (deliberate change): a claim that holds scheme payments reports claim_has_payments when it is moved back
+  await expect(setStatus(c, psy, claim, "draft")).rejects.toThrow(/claim_has_payments/);
+  await expect(setStatus(c, psy, claim, "rejected", ", rejection_reason='x'")).rejects.toThrow(/claim_has_payments/);
 }));
 
 it("rejection needs a reason and creates exactly one task per rejection", () => withClient(async (c) => {
@@ -154,8 +155,7 @@ it("submitting or accepting a claim never changes the invoice status or paid amo
   await pay(c, psy, i, "eft", 20000, "P");
   expect(await status(c, i)).toBe("part_paid");
   await setStatus(c, psy, claim, "submitted");
-  await setStatus(c, psy, claim, "accepted");
-  await as(c, psy, "update claims set approved_cents=80000 where id=$1", [claim]);
+  await setStatus(c, psy, claim, "accepted", ", approved_cents=80000"); // 0021: the approved amount is only set by accepting
   expect(await status(c, i)).toBe("part_paid");
   expect(await paid(c, i)).toBe(20000);
   const j = await mkMaInvoice(c, (await c.query("select patient_id from invoices where id=$1", [i])).rows[0].patient_id);
@@ -437,8 +437,11 @@ it("claim ICD-10 codes must exist in icd10_codes; approved cannot exceed claimed
   const { i: i2, m: m2 } = await mkMaInvoice(c, (await c.query("select patient_id from invoices where id=$1", [i])).rows[0].patient_id);
   await expect(as(c, psy, "insert into claims(invoice_id,member_id,claimed_cents,icd10_codes) values ($1,$2,1,'{nope}')", [i2, m2])).rejects.toThrow(/unknown_icd10/);
   await as(c, psy, "update claims set icd10_codes='{F41.1,F43.2}' where id=$1", [claim]);
-  await expect(as(c, psy, "update claims set approved_cents=80001 where id=$1", [claim])).rejects.toThrow(/check constraint/);
-  await as(c, psy, "update claims set approved_cents=80000 where id=$1", [claim]);
+  // 0021: approved_cents changes only when the claim is accepted
+  await expect(as(c, psy, "update claims set approved_cents=80000 where id=$1", [claim])).rejects.toThrow(/approved_frozen/);
+  await setStatus(c, psy, claim, "submitted");
+  await expect(setStatus(c, psy, claim, "accepted", ", approved_cents=80001")).rejects.toThrow(/check constraint/);
+  await setStatus(c, psy, claim, "accepted", ", approved_cents=80000");
 }));
 
 it("medical_aid_members: staff write; patient/guardian read own; bookkeeper, associate and others see nothing", () => withClient(async (c) => {

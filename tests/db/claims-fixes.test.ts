@@ -100,11 +100,13 @@ it("accepting a part paid claim: the transition goes to paid when the remittance
   expect(await ev(b)).toEqual(["draft", "submitted", "part_paid", "accepted"]);
   await remit(c, psy, b, 5000, "P-B2");
   expect(await cs(c, b)).toBe("paid");
-  // the move is still limited: part_paid cannot be rejected or reopened
+  // the move is still limited: part_paid cannot be rejected or reopened (0021: reported as claim_has_payments)
   const d = await mk(1000);
   await setStatus(c, psy, d, "submitted"); await remit(c, psy, d, 500, "P-D");
-  await expect(setStatus(c, psy, d, "rejected", ", rejection_reason='x'")).rejects.toThrow(/invalid_claim_transition/);
-  await expect(setStatus(c, psy, d, "draft")).rejects.toThrow(/invalid_claim_transition/);
+  await expect(setStatus(c, psy, d, "rejected", ", rejection_reason='x'")).rejects.toThrow(/claim_has_payments/);
+  await expect(setStatus(c, psy, d, "draft")).rejects.toThrow(/claim_has_payments/);
+  // and an accepted claim that holds payments cannot go back to submitted, rejected or draft
+  await expect(setStatus(c, psy, b, "submitted")).rejects.toThrow(/claim_has_payments/);
 }));
 
 // ---- MINOR: a claim cannot be submitted without a code or an amount ------------------------------------------------------------------------------
@@ -139,8 +141,10 @@ it("medical aid members cannot be deleted by anyone, not even the owner; end-dat
 // ---- MINOR: check constraint names the app maps -------------------------------------------------------------------------------------------------------
 it("the check constraints behind the claim amount errors have the names the app matches", () => withClient(async (c) => {
   const { psy, mk } = await setup(c);
-  const a = await mk(1000);
-  await expect(as(c, psy, "update claims set approved_cents=1001 where id=$1", [a])).rejects.toThrow(/violates check constraint "claims_check"/);
-  await expect(as(c, psy, "update claims set approved_cents=-1 where id=$1", [a])).rejects.toThrow(/violates check constraint "claims_(approved_cents_)?check"/);
-  await expect(as(c, psy, "update claims set claimed_cents=-1 where id=$1", [a])).rejects.toThrow(/violates check constraint "claims_claimed_cents_check"/);
+  const a = await mk(1000), b = await mk(1000);
+  await setStatus(c, psy, a, "submitted"); await setStatus(c, psy, b, "submitted");
+  await expect(setStatus(c, psy, a, "accepted", ", approved_cents=1001")).rejects.toThrow(/violates check constraint "claims_check"/);
+  await expect(setStatus(c, psy, b, "accepted", ", approved_cents=-1")).rejects.toThrow(/violates check constraint "claims_(approved_cents_)?check"/);
+  const draft = await mk(1000);
+  await expect(as(c, psy, "update claims set claimed_cents=-1 where id=$1", [draft])).rejects.toThrow(/violates check constraint "claims_claimed_cents_check"/);
 }));
