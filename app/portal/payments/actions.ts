@@ -5,7 +5,9 @@ import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/session";
 import { safely } from "@/lib/appointments/followups";
 import { buildCheckout, payfastAvailable } from "@/lib/payments/payfast";
-import { checkoutIdentity, decideCheckout, PAY_ONLINE_UNAVAILABLE } from "@/lib/portal/payments";
+import { checkoutIdentity, CHECKOUT_RECENT_TEXT, decideCheckout, PAY_ONLINE_UNAVAILABLE } from "@/lib/portal/payments";
+import { startedRecently } from "@/lib/portal/recent-checkout";
+import { sastDate } from "@/lib/time";
 import { loadInvoiceForCheckout } from "@/lib/portal/load";
 import { supabaseServer } from "@/lib/supabase/server";
 
@@ -23,6 +25,8 @@ const seen = z.number().int().positive().max(2_147_483_647).optional();
  *  - the invoice, its payments and its credit notes are read through the CALLER'S client, so RLS decides whether it is theirs
  *    (a guardian also needs permissions.pay) and the amount comes from those rows, never from the client;
  *  - payNowAllowed() is recomputed (self-pay always, medical aid / split only once the scheme side is settled, R40);
+ *  - a checkout this user started for this invoice in the last 10 minutes (audit rows, see lib/portal/recent-checkout.ts) is refused with a friendly
+ *    message; that guard is advisory and fails open, the ITN reconciles any real duplicate (R37);
  *  - the PayFast name and email are the VERIFIED user's own (auth.getUser() and their profile), for a guardian the guardian's, not the child's.
  * `seenCents` is only what the page displayed: if it no longer matches the balance the checkout is refused. It is never charged.
  * Returns the PayFast form (action URL + signed fields) for the page to POST; money is only ever recorded by the signed ITN.
@@ -36,8 +40,10 @@ export async function startPayfastCheckout(rawInvoiceId: unknown, rawSeenCents?:
   try {
     const sb = await supabaseServer();
     const loaded = await loadInvoiceForCheckout(sb, id.data);
-    const decision = decideCheckout({ invoice: loaded?.invoice ?? null, payments: loaded?.payments ?? [], credits: loaded?.credits ?? [], seenCents: seenCents.data });
+    const decision = decideCheckout({ invoice: loaded?.invoice ?? null, payments: loaded?.payments ?? [], credits: loaded?.credits ?? [], seenCents: seenCents.data, today: sastDate(new Date()) });
     if (!decision.ok) return { ok: false, error: decision.error };
+    // advisory only (fails open): the same user started a checkout for this invoice a moment ago, so the first payment is probably still being confirmed
+    if (await startedRecently(me.userId, id.data)) return { ok: false, error: CHECKOUT_RECENT_TEXT };
     if (!payfastAvailable()) return { ok: false, error: PAY_ONLINE_UNAVAILABLE };
 
     const { data: { user } } = await sb.auth.getUser(); // validated by the Auth server, not the cookie

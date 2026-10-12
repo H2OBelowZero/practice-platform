@@ -7,7 +7,7 @@ import { portionSummary } from "@/lib/billing/portions";
 import { requireRole } from "@/lib/auth/session";
 import { formatZar } from "@/lib/money";
 import { payfastAvailable } from "@/lib/payments/payfast";
-import { creditText, hasPortalReceipt, isOpenStatus, PAY_ONLINE_UNAVAILABLE, payNowReasonText } from "@/lib/portal/payments";
+import { creditText, hasPortalReceipt, hidePayNow, isOpenStatus, parsePaidParam, PAY_ONLINE_UNAVAILABLE, payNowReasonText, RETURN_TEXT, returnState } from "@/lib/portal/payments";
 import { supabaseServer } from "@/lib/supabase/server";
 import { sastDate, sastDateLabel, sastDayShort } from "@/lib/time";
 import { Card } from "@/components/ui/card";
@@ -29,7 +29,7 @@ const TH = "px-4 py-3 font-medium";
  * page answers 404. No claim, diagnosis or credit-note reason is read here: the medical aid portion is shown as plain figures from payments and
  * credit notes.
  */
-export default async function PortalInvoice({ params }: { params: Promise<{ invoiceId: string }> }) {
+export default async function PortalInvoice({ params, searchParams }: { params: Promise<{ invoiceId: string }>; searchParams: Promise<{ paid?: string | string[] }> }) {
   const me = await requireRole(["patient", "guardian"]);
   const id = uuid.safeParse((await params).invoiceId);
   if (!id.success) notFound();
@@ -60,11 +60,22 @@ export default async function PortalInvoice({ params }: { params: Promise<{ invo
   const payNow = payNowAllowed({ status: inv.status, payerType: inv.payer_type, totalCents: inv.total_cents, schemePortionCents: inv.scheme_portion_cents, patientPortionCents: inv.patient_portion_cents, credits: creditList, payments: payList });
   const overdue = open && inv.due_date < sastDate(new Date());
   const online = payfastAvailable();
+  // I1: arriving from PayFast for THIS invoice: show its stored status, never Pay now (a second click would be a second payment)
+  const paidId = parsePaidParam((await searchParams).paid);
+  const ret = paidId === inv.id ? returnState(inv, pays) : "none";
+  const hide = hidePayNow(paidId, inv.id, ret);
 
   return (
     <>
       <PageHeader title={`Invoice ${inv.number}`} description={<Link href="/portal/payments">Back to payments</Link>} />
       {loadFailed && <Notice tone="error">Some of this invoice could not be loaded. Please refresh the page before relying on the figures.</Notice>}
+      {ret === "confirming" && (
+        <Notice tone="info" title="Confirming your payment">
+          <p>{RETURN_TEXT.confirming}</p>
+          <p><Link href={`/portal/payments/${inv.id}?paid=${inv.id}`}>Refresh</Link></p>
+        </Notice>
+      )}
+      {ret === "paid" && <Notice tone="success" title="Paid">{RETURN_TEXT.paid}</Notice>}
 
       <Card className="mb-6">
         <div className="mb-5 flex flex-wrap gap-2"><StatusChip status={inv.status} />{overdue && <StatusChip status="overdue" />}</div>
@@ -77,11 +88,15 @@ export default async function PortalInvoice({ params }: { params: Promise<{ invo
         </dl>
         {open && (
           <div className="mt-5 rounded-xl bg-sunk p-4">
-            {payNow.allowed
-              ? online
-                ? <PayNow invoiceId={inv.id} amountCents={payNow.amountCents} amountLabel={formatZar(payNow.amountCents)} invoiceNumber={inv.number} />
-                : <p>{PAY_ONLINE_UNAVAILABLE}</p>
-              : <p>{payNowReasonText(payNow.reason)}</p>}
+            {loadFailed
+              ? <p>Online payment is paused until the page loads completely. Please refresh the page.</p> // M1: the figures cannot be trusted
+              : hide
+                ? <p>Waiting for confirmation of your payment. Please do not pay again.</p>
+                : payNow.allowed
+                  ? online
+                    ? <PayNow invoiceId={inv.id} amountCents={payNow.amountCents} amountLabel={formatZar(payNow.amountCents)} invoiceNumber={inv.number} />
+                    : <p>{PAY_ONLINE_UNAVAILABLE}</p>
+                  : <p>{payNowReasonText(payNow.reason, { issueDate: inv.issue_date, today: sastDate(new Date()) })}</p>}
           </div>
         )}
       </Card>

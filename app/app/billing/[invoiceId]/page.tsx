@@ -56,20 +56,22 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const inv = data as Inv | null;
   if (!inv) notFound();
 
-  const [linesR, paysR, creditsR, claimsR, patR, evR] = await Promise.all([
+  const [linesR, paysR, creditsR, reasonsR, claimsR, patR, evR] = await Promise.all([
     sb.from("invoice_lines").select("id, description, quantity, unit_cents").eq("invoice_id", inv.id).order("position").order("id"),
     sb.from("payments").select("id, method, reference, gateway_ref, amount_cents, received_on, recorded_by").eq("invoice_id", inv.id).eq("status", "succeeded").order("received_on").order("created_at"),
-    sb.from("credit_notes").select(write ? "id, amount_cents, portion, reason, created_at" : "id, amount_cents, portion, created_at").eq("invoice_id", inv.id).order("created_at"),
+    sb.from("credit_notes").select("id, amount_cents, portion, created_at").eq("invoice_id", inv.id).order("created_at"), // reason / created_by are not granted on the table (0018)
+    write ? sb.rpc("credit_note_details", { p_invoice: inv.id }) : Promise.resolve({ data: null, error: null }), // psychologist / admin only; the bookkeeper sees no reasons (R39)
     sb.from("claim_summary").select("id, status, claimed_cents, approved_cents").eq("invoice_id", inv.id),
     write ? sb.from("patients").select("first_name, last_name").eq("id", inv.patient_id).maybeSingle() : Promise.resolve({ data: null }),
     me.role === "psychologist" ? sb.from("audit_log").select("id, actor_id, role, action, at").or(invoiceAuditFilter(inv.id)).order("id", { ascending: false }).limit(100) : Promise.resolve({ data: null }),
   ]);
   const lines = (linesR.data ?? []) as Line[];
   const pays = (paysR.data ?? []) as Pay[];
-  const credits = (creditsR.data ?? []) as unknown as Credit[];
+  const reasonOf = new Map(((reasonsR.data ?? []) as { id: string; reason: string }[]).map((r) => [r.id, r.reason]));
+  const credits = ((creditsR.data ?? []) as unknown as Credit[]).map((c) => ({ ...c, reason: reasonOf.get(c.id) }));
   const claims = (claimsR.data ?? []) as Claim[];
   const events = (evR.data ?? []) as Ev[];
-  const loadFailed = !!(linesR.error || paysR.error || creditsR.error);
+  const loadFailed = !!(linesR.error || paysR.error || creditsR.error || reasonsR.error);
 
   const paid = pays.reduce((s, p) => s + p.amount_cents, 0);
   const credited = credits.reduce((s, c) => s + c.amount_cents, 0);

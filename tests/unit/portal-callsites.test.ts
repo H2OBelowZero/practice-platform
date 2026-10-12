@@ -59,7 +59,7 @@ describe("portal reads", () => {
 
   it("finds the reads it is meant to check", () => {
     expect(reads.length).toBeGreaterThan(12);
-    expect(new Set(reads.map((r) => r.table))).toEqual(new Set(["invoice_balances", "payments", "credit_notes", "patients", "invoices", "invoice_lines", "profiles"]));
+    expect(new Set(reads.map((r) => r.table))).toEqual(new Set(["invoice_balances", "payments", "credit_notes", "patients", "invoices", "invoice_lines", "profiles", "audit_log"]));
   });
   it("every selected column exists in the migrations", () => {
     for (const r of reads) {
@@ -73,7 +73,7 @@ describe("portal reads", () => {
     for (const c of ["credit_cents", "scheme_credit_cents", "patient_credit_cents", "outstanding_cents", "paid_cents"]) expect(v.has(c), c).toBe(true);
   });
   it("never reads what a patient must not see: claims, ICD-10, claim summaries, member identity, the free-text credit note reason, the audit log", () => {
-    for (const f of portalFiles) {
+    for (const f of portalFiles.filter((p) => !p.endsWith("recent-checkout.ts"))) { // (that one file reads audit_log ids through the service client: tested below)
       const s = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "");
       expect(s, rel(f)).not.toMatch(/claim|icd10|medical_aid_members|audit_log|\breason\b.*credit_notes|credit_notes.*"[^"]*\breason\b/i);
     }
@@ -93,8 +93,12 @@ describe("portal gates and the service client", () => {
     expect(pages.length).toBeGreaterThanOrEqual(5);
     for (const f of pages) expect(src(f), rel(f)).toMatch(/requireRole\(\["patient", "guardian"\]\)/);
   });
-  it("nothing in the portal payments code uses the service-role client: reads are the user's own (RLS); only audit() writes", () => {
-    for (const f of portalFiles) expect(src(f), rel(f)).not.toMatch(/supabaseService|SUPABASE_SERVICE_ROLE_KEY/);
+  it("the service-role client appears in exactly one portal file, lib/portal/recent-checkout.ts, which reads only ids from audit_log; everything else is the user's own session (RLS); only audit() writes", () => {
+    const users = portalFiles.filter((f) => /supabaseService|SUPABASE_SERVICE_ROLE_KEY/.test(src(f))).map(rel);
+    expect(users).toEqual(["lib/portal/recent-checkout.ts"]);
+    const r = src(join(root, "lib", "portal", "recent-checkout.ts"));
+    expect(r).toMatch(/\.from\("audit_log"\)\s*\.select\("id"\)/);
+    expect(r).not.toMatch(/\.(insert|update|upsert|delete)\(|\.rpc\(/);
   });
   it("the portal never writes money or invoices", () => {
     for (const f of portalFiles) expect(src(f), rel(f)).not.toMatch(/\.(insert|update|upsert|delete)\(|record_payment|record_scheme_remittance|invoice_recompute/);
@@ -130,5 +134,37 @@ describe("staff credit note call site (0017)", () => {
     const a = src(join(root, "app", "app", "billing", "actions.ts"));
     expect(a).toMatch(/from\("credit_notes"\)\.insert\(\{[^}]*portion: c\.value\.portion/);
     expect(a).toMatch(/parseCreditNoteForm\(values, String\(payerRow\.payer_type\)\)/);
+  });
+});
+
+describe("0018: credit_notes.reason and created_by are not readable through the table", () => {
+  const all = [...walk(join(root, "app")), ...walk(join(root, "lib"))].filter((f) => /\.tsx?$/.test(f));
+  const ALLOWED = new Set(["id", "invoice_id", "amount_cents", "portion", "created_at"]);
+  it("every read of credit_notes in app/ and lib/ selects only the granted columns (no select *, no reason, no created_by)", () => {
+    let n = 0;
+    for (const f of all) {
+      for (const m of src(f).matchAll(/\.from\("credit_notes"\)\s*\.select\(\s*([^)]*)\)/g)) {
+        n++;
+        const arg = m[1].trim();
+        expect(arg, `${rel(f)} select argument`).toMatch(/^"[^"]*"/); // a plain string literal: no ternary, no variable
+        const cols = /^"([^"]*)"/.exec(arg)![1].split(",").map((c) => c.trim());
+        for (const c of cols) expect(ALLOWED.has(c), `${rel(f)}: credit_notes.${c}`).toBe(true);
+      }
+    }
+    expect(n).toBeGreaterThanOrEqual(5);
+  });
+  it("the credit note insert does not ask for rows back (no select on reason is needed)", () => {
+    const a = src(join(root, "app", "app", "billing", "actions.ts"));
+    expect(a).not.toMatch(/from\("credit_notes"\)\.insert\([^;]*\)\s*\.select/);
+  });
+  it("the staff invoice page reads reasons only through credit_note_details, and the parameter name matches the SQL", () => {
+    const page = src(join(root, "app", "app", "billing", "[invoiceId]", "page.tsx"));
+    expect(page).toMatch(/rpc\("credit_note_details", \{ p_invoice: /);
+    const sig = /create function credit_note_details\((\w+) uuid\)/.exec(sql);
+    expect(sig?.[1]).toBe("p_invoice");
+    expect(page).not.toMatch(/credit_notes"\)\.select\([^)]*reason/);
+  });
+  it("the portal never calls credit_note_details", () => {
+    for (const f of portalFiles) expect(src(f), rel(f)).not.toMatch(/credit_note_details/);
   });
 });

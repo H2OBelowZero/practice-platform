@@ -10,9 +10,18 @@ export const PAY_ONLINE_UNAVAILABLE = "Online payment is not available right now
 export const SCHEME_PENDING_TEXT = "Your medical aid is still processing its part of this invoice — you'll be able to pay your portion once it has been settled.";
 export const DEFAULT_PAYMENT_INSTRUCTIONS = "Please contact the practice for EFT details.";
 
-/** Plain-language reason a "Pay now" button is not offered. */
-export function payNowReasonText(reason: PayNow["reason"] | undefined): string {
-  if (reason === "scheme_pending") return SCHEME_PENDING_TEXT;
+export const NOT_YET_TEXT = "This invoice can't be paid online yet. Please contact the practice if you have any questions.";
+/**
+ * The friendly "your medical aid is still processing" sentence is true for a while after an invoice is issued, but the portal cannot see claims
+ * (staff only), so it cannot tell a claim in progress from one that will never settle by itself (rejected, never submitted, written off elsewhere).
+ * Decision: friendly wording for the first SCHEME_WAIT_DAYS days after the issue date, a neutral "contact the practice" sentence after that.
+ */
+export const SCHEME_WAIT_DAYS = 60;
+const daysBetween = (from: string, to: string) => Math.floor((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+
+/** Plain-language reason a "Pay now" button is not offered. `ctx` (issue date and today, YYYY-MM-DD) switches the medical aid wording by invoice age. */
+export function payNowReasonText(reason: PayNow["reason"] | undefined, ctx?: { issueDate: string; today: string }): string {
+  if (reason === "scheme_pending") return ctx && daysBetween(ctx.issueDate, ctx.today) > SCHEME_WAIT_DAYS ? NOT_YET_TEXT : SCHEME_PENDING_TEXT;
   if (reason === "paid") return "This invoice has been paid.";
   return "This invoice cannot be paid online.";
 }
@@ -31,6 +40,8 @@ export type PortalInvoice = {
   /** first name of the person the invoice is for when that is not the signed-in user (a guardian's child), else null */
   forName: string | null;
   payNow: PayNow;
+  /** why there is no Pay now button on an open invoice (null when it is payable or not open) */
+  noPayText: string | null;
 };
 
 /** True for an invoice that can still be paid (issued or part paid). */
@@ -56,6 +67,7 @@ export function buildPortalInvoices(o: {
       id: i.id, number: i.number, status: i.status, payerType: i.payer_type, issueDate: i.issue_date, dueDate: i.due_date,
       totalCents: i.total_cents, outstandingCents: isOpenStatus(i.status) ? i.outstanding_cents : 0, overdue: isOverdue(i, o.today), open: isOpenStatus(i.status),
       forName: p && p.user_id !== o.userId ? p.first_name : null, payNow,
+      noPayText: isOpenStatus(i.status) && !payNow.allowed ? payNowReasonText(payNow.reason, { issueDate: i.issue_date, today: o.today }) : null,
     };
   });
 }
@@ -98,13 +110,21 @@ export function returnState(inv: { status: string } | undefined, payments: { met
   if (!inv) return "none";
   return inv.status === "paid" || payments.some((p) => p.method === "payfast") ? "paid" : "confirming";
 }
+/**
+ * The PayFast return URL names the invoice that was just paid. While it is still unpaid in our records (the ITN has not arrived) and also once it
+ * is paid, that invoice shows no Pay now: offering it again invites a second payment. Other invoices are unaffected.
+ */
+export const hidePayNow = (paidId: string | null, invoiceId: string, state: ReturnState): boolean => paidId !== null && paidId === invoiceId && state !== "none";
+
+export const RECENT_CHECKOUT_MINUTES = 10;
+/** The earliest instant that still counts as "started a moment ago". */
+export const recentCheckoutCutoff = (now: Date): string => new Date(now.getTime() - RECENT_CHECKOUT_MINUTES * 60_000).toISOString();
+export const CHECKOUT_RECENT_TEXT = "A payment for this invoice was just started. Please wait a few minutes for confirmation.";
+
 export const RETURN_TEXT = {
   confirming: "We're confirming your payment. This usually takes a minute; refresh this page.",
   paid: "Paid, thank you.",
 } as const;
-
-/** The patient-facing name of a payer type. */
-export const PAYER_TEXT: Record<string, string> = { self: "You pay", medical_aid: "Your medical aid pays", split: "Medical aid and you" };
 
 /** How a credit note is described to the patient. The staff's free-text reason is never read for the portal. */
 export const creditText = (portion: string): string =>
@@ -125,8 +145,8 @@ export type CheckoutDecision =
  * checkout is refused so nobody pays a figure they did not see.
  */
 export function decideCheckout(o: {
-  invoice: { number: string; status: string; payer_type: string; total_cents: number; scheme_portion_cents: number; patient_portion_cents: number } | null;
-  payments: { method: string; amountCents: number }[]; credits: { portion: string; amountCents: number }[]; seenCents?: number;
+  invoice: { number: string; status: string; payer_type: string; total_cents: number; scheme_portion_cents: number; patient_portion_cents: number; issue_date?: string } | null;
+  payments: { method: string; amountCents: number }[]; credits: { portion: string; amountCents: number }[]; seenCents?: number; today?: string;
 }): CheckoutDecision {
   const inv = o.invoice;
   if (!inv || inv.status === "draft") return { ok: false, code: "not_found", error: "We could not find that invoice." };
@@ -134,7 +154,7 @@ export function decideCheckout(o: {
     status: inv.status, payerType: inv.payer_type, totalCents: inv.total_cents, schemePortionCents: inv.scheme_portion_cents,
     patientPortionCents: inv.patient_portion_cents, credits: o.credits, payments: o.payments,
   });
-  if (!v.allowed) return { ok: false, code: v.reason ?? "not_payable", error: payNowReasonText(v.reason) };
+  if (!v.allowed) return { ok: false, code: v.reason ?? "not_payable", error: payNowReasonText(v.reason, inv.issue_date && o.today ? { issueDate: inv.issue_date, today: o.today } : undefined) };
   if (o.seenCents !== undefined && o.seenCents !== v.amountCents) {
     return { ok: false, code: "stale", error: `The amount on this invoice has changed (it is now ${formatZar(v.amountCents)}). Please refresh the page and check it before paying.` };
   }

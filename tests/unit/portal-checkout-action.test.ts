@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // (an invoice that is not theirs is simply absent, as it would be through RLS).
 const h = vi.hoisted(() => ({
   requireRole: vi.fn(), audit: vi.fn(), db: {} as Record<string, unknown[]>, reads: [] as string[], user: { id: "", email: "" as string | null },
-  service: vi.fn(),
+  service: vi.fn(), recent: false, lookup: "ok" as "ok" | "error" | "throw", filters: [] as unknown[][], selected: [] as string[],
 }));
 vi.mock("@/lib/auth/session", () => ({ requireRole: (...a: unknown[]) => h.requireRole(...a) }));
 vi.mock("@/lib/audit", () => ({ audit: (...a: unknown[]) => h.audit(...a) }));
@@ -25,7 +25,7 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 import { startPayfastCheckout } from "@/app/portal/payments/actions";
-import { SCHEME_PENDING_TEXT, PAY_ONLINE_UNAVAILABLE } from "@/lib/portal/payments";
+import { SCHEME_PENDING_TEXT, PAY_ONLINE_UNAVAILABLE, CHECKOUT_RECENT_TEXT } from "@/lib/portal/payments";
 
 const INV = "3f6b2c1e-5a7d-4e2b-9c1a-0d4f6a8b2c3d";
 const ME = "11111111-1111-4111-8111-111111111111";
@@ -37,6 +37,19 @@ beforeEach(() => {
   h.requireRole.mockReset(); h.requireRole.mockResolvedValue({ userId: ME, role: "patient" });
   h.audit.mockReset(); h.audit.mockResolvedValue(undefined);
   h.service.mockReset(); h.reads.length = 0;
+  // the only thing the service client is used for here: the advisory "started recently" lookup in audit_log (ids only)
+  h.recent = false; h.lookup = "ok"; h.filters = []; h.selected = [];
+  h.service.mockImplementation(() => ({
+    from: (table: string) => {
+      h.reads.push("service:" + table);
+      if (h.lookup === "throw") throw new Error("service down");
+      const q: Record<string, unknown> = {};
+      q.select = (cols: string) => { h.selected.push(cols); return q; };
+      for (const m of ["eq", "gte", "limit"]) q[m] = (...a: unknown[]) => { h.filters.push([m, ...a]); return q; };
+      q.then = (res: (v: unknown) => unknown) => res(h.lookup === "error" ? { data: null, error: { message: "boom" } } : { data: h.recent ? [{ id: 1 }] : [], error: null });
+      return q;
+    },
+  }));
   h.user.id = ME; h.user.email = "thandi@example.co.za";
   h.db = { invoices: [invoice()], payments: [], credit_notes: [], profiles: [{ display_name: "Thandi Nkosi" }] };
   vi.stubEnv("PAYFAST_MERCHANT_ID", "10000100"); vi.stubEnv("PAYFAST_MERCHANT_KEY", "46f0cd694581a"); vi.stubEnv("PAYFAST_PASSPHRASE", "x");
@@ -67,10 +80,42 @@ describe("startPayfastCheckout", () => {
     expect(r.fields.signature).toMatch(/^[0-9a-f]{32}$/);
   });
 
-  it("everything is read through the user's own client (never the service client), and the amount comes from those rows", async () => {
+  it("everything is read through the user's own client; the service client is used only for the audit_log lookup (ids only)", async () => {
     await startPayfastCheckout(INV);
-    expect(h.service).not.toHaveBeenCalled();
+    expect(h.reads.filter((r) => r.startsWith("service:"))).toEqual(["service:audit_log"]);
+    expect(h.selected).toEqual(["id"]);
     expect(h.reads).toEqual(expect.arrayContaining(["invoices", "payments", "credit_notes", "profiles"]));
+  });
+
+  describe("I1: a checkout the same user started a moment ago", () => {
+    it("is refused with the friendly message, no new audit row and no checkout form", async () => {
+      h.recent = true;
+      expect(await startPayfastCheckout(INV)).toEqual({ ok: false, error: CHECKOUT_RECENT_TEXT });
+      expect(h.audit).not.toHaveBeenCalled();
+    });
+    it("looks for THIS user's payment.checkout_started rows for THIS invoice in the last 10 minutes", async () => {
+      const before = Date.now();
+      await startPayfastCheckout(INV);
+      const f = Object.fromEntries(h.filters.map(([m, k, v]) => [m + ":" + k, v]));
+      expect(f["eq:actor_id"]).toBe(ME);
+      expect(f["eq:action"]).toBe("payment.checkout_started");
+      expect(f["eq:entity_id"]).toBe(INV);
+      const cutoff = Date.parse(f["gte:at"] as string);
+      expect(before - cutoff).toBeGreaterThanOrEqual(10 * 60_000 - 50);
+      expect(before - cutoff).toBeLessThan(10 * 60_000 + 5_000);
+    });
+    it("fails OPEN: a lookup error or a thrown lookup never blocks a payment", async () => {
+      for (const mode of ["error", "throw"] as const) {
+        h.lookup = mode; h.recent = true; // even if it had said 'recent', an unreadable answer is ignored
+        const r = await startPayfastCheckout(INV);
+        expect(r.ok, mode).toBe(true);
+      }
+    });
+    it("is checked after the amount and permission decisions, so a refused invoice gives its own reason", async () => {
+      h.recent = true;
+      h.db.invoices = [invoice({ status: "paid" })];
+      expect(await startPayfastCheckout(INV)).toMatchObject({ ok: false, error: "This invoice has been paid." });
+    });
   });
 
   it("a guardian's checkout carries the guardian's own name and email, not the child's", async () => {

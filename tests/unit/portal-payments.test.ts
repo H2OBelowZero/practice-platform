@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildPortalInvoices, checkoutIdentity, creditText, decideCheckout, hasPortalReceipt, orderInvoices, parsePaidParam, payNowReasonText, receiptView,
-  returnState, SCHEME_PENDING_TEXT, summarise, type CreditRow, type InvoiceRow, type PaymentRow, type PortalInvoice,
+  returnState, SCHEME_PENDING_TEXT, summarise, NOT_YET_TEXT, SCHEME_WAIT_DAYS, hidePayNow, recentCheckoutCutoff, RECENT_CHECKOUT_MINUTES, CHECKOUT_RECENT_TEXT, type CreditRow, type InvoiceRow, type PaymentRow, type PortalInvoice,
 } from "@/lib/portal/payments";
 import { payfastAvailable } from "@/lib/payments/payfast";
 
@@ -33,6 +33,11 @@ describe("buildPortalInvoices", () => {
     // R200 patient goodwill credit does not settle the scheme: refused
     expect(list[1].payNow).toEqual({ allowed: false, reason: "scheme_pending", amountCents: 30000 });
   });
+  it("M2: carries the text to show instead of Pay now, by invoice age", () => {
+    const mk = (id: string, issue_date: string) => inv({ id, issue_date, payer_type: "medical_aid", total_cents: 100000, scheme_portion_cents: 100000, patient_portion_cents: 0, outstanding_cents: 100000 });
+    const list = buildPortalInvoices({ invoices: [mk("new", "2031-03-01"), mk("old", "2030-12-01"), inv({ id: "self" })], payments: [], credits: [], patients: people, userId: ME, today: TODAY });
+    expect(list.map((i) => i.noPayText)).toEqual([SCHEME_PENDING_TEXT, NOT_YET_TEXT, null]);
+  });
   it("a scheme write-off settles it", () => {
     const [i] = buildPortalInvoices({
       invoices: [inv({ id: "b", payer_type: "split", total_cents: 100000, scheme_portion_cents: 70000, patient_portion_cents: 30000, outstanding_cents: 30000, status: "part_paid" })],
@@ -58,7 +63,7 @@ describe("buildPortalInvoices", () => {
 describe("orderInvoices and summarise", () => {
   const mk = (id: string, status: string, due: string, issued: string, outstanding: number, payNow: PortalInvoice["payNow"]): PortalInvoice => ({
     id, number: id, status, payerType: "self", issueDate: issued, dueDate: due, totalCents: 1000, outstandingCents: outstanding, overdue: false,
-    open: status === "issued" || status === "part_paid", forName: null, payNow,
+    open: status === "issued" || status === "part_paid", forName: null, payNow, noPayText: null,
   });
   const list = [
     mk("late", "issued", "2031-04-01", "2031-03-01", 30000, { allowed: true, amountCents: 30000 }),
@@ -120,6 +125,12 @@ describe("decideCheckout (the server's decision; pure part of startPayfastChecko
     const r = decideCheckout({ invoice: split, payments: [{ method: "medical_aid", amountCents: 50000 }], credits: [{ portion: "patient", amountCents: 20000 }] });
     expect(r).toEqual({ ok: false, code: "scheme_pending", error: SCHEME_PENDING_TEXT });
     expect(decideCheckout({ invoice: split, payments: [{ method: "medical_aid", amountCents: 50000 }], credits: [{ portion: "scheme", amountCents: 20000 }] })).toMatchObject({ ok: true, amountCents: 30000 });
+  });
+  it("M2: an old medical aid invoice gets the neutral sentence, a recent one the friendly one", () => {
+    const old = { ...split, issue_date: "2030-01-01" }, fresh = { ...split, issue_date: "2031-03-01" };
+    const o = { payments: [{ method: "medical_aid", amountCents: 50000 }], credits: [], today: "2031-03-10" };
+    expect(decideCheckout({ invoice: fresh, ...o })).toEqual({ ok: false, code: "scheme_pending", error: SCHEME_PENDING_TEXT });
+    expect(decideCheckout({ invoice: old, ...o })).toEqual({ ok: false, code: "scheme_pending", error: NOT_YET_TEXT });
   });
   it("unknown, draft, paid, void and overpaid invoices are refused", () => {
     expect(decideCheckout({ invoice: null, payments: [], credits: [] })).toMatchObject({ ok: false, code: "not_found" });
@@ -192,8 +203,39 @@ describe("wording", () => {
     expect(payNowReasonText("not_payable")).toMatch(/cannot be paid online/);
     expect(payNowReasonText(undefined)).toMatch(/cannot be paid online/);
   });
+  it("M2: the friendly 'still processing' wording is used for the first 60 days after issue; after that a neutral sentence (the scheme may never settle by itself)", () => {
+    expect(SCHEME_WAIT_DAYS).toBe(60);
+    expect(NOT_YET_TEXT).toBe("This invoice can't be paid online yet. Please contact the practice if you have any questions.");
+    const at = (issueDate: string, today: string) => payNowReasonText("scheme_pending", { issueDate, today });
+    expect(at("2031-01-01", "2031-01-01")).toBe(SCHEME_PENDING_TEXT);
+    expect(at("2031-01-01", "2031-03-02")).toBe(SCHEME_PENDING_TEXT); // day 60
+    expect(at("2031-01-01", "2031-03-03")).toBe(NOT_YET_TEXT);        // day 61
+    expect(at("2030-01-01", "2031-03-03")).toBe(NOT_YET_TEXT);
+    expect(at("2031-03-05", "2031-03-01")).toBe(SCHEME_PENDING_TEXT); // a future issue date is not 'old'
+  });
+  it("the age rule applies only to scheme_pending", () => {
+    expect(payNowReasonText("paid", { issueDate: "2000-01-01", today: "2031-01-01" })).toBe("This invoice has been paid.");
+    expect(payNowReasonText("not_payable", { issueDate: "2000-01-01", today: "2031-01-01" })).toMatch(/cannot be paid online/);
+  });
   it("credit notes are described without the staff's free-text reason", () => {
     expect(creditText("scheme")).toMatch(/medical aid/);
     expect(creditText("patient")).toBe("Discount or write-off");
+  });
+});
+
+describe("I1: a payment that was just started", () => {
+  it("Pay now is hidden for the invoice the PayFast return URL names, whether it is confirming or paid; other invoices are unaffected", () => {
+    expect(hidePayNow("a", "a", "confirming")).toBe(true);
+    expect(hidePayNow("a", "a", "paid")).toBe(true);
+    expect(hidePayNow("a", "b", "confirming")).toBe(false);
+    expect(hidePayNow(null, "a", "none")).toBe(false);
+    expect(hidePayNow("a", "a", "none")).toBe(false); // not one of the user's invoices: nothing to hide
+  });
+  it("the advisory window is 10 minutes and the cutoff is exactly that far back", () => {
+    expect(RECENT_CHECKOUT_MINUTES).toBe(10);
+    expect(recentCheckoutCutoff(new Date("2031-03-10T12:00:00.000Z"))).toBe("2031-03-10T11:50:00.000Z");
+  });
+  it("the refusal text", () => {
+    expect(CHECKOUT_RECENT_TEXT).toBe("A payment for this invoice was just started. Please wait a few minutes for confirmation.");
   });
 });

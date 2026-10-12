@@ -20,7 +20,12 @@ export function PayNow({ invoiceId, amountLabel, amountCents, invoiceNumber }: {
   const formRef = useRef<HTMLFormElement>(null);
   const errRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { if (ready) formRef.current?.submit(); }, [ready]);
+  // focus first (so keyboard and screen reader users land on "Continue to PayFast" if the automatic submit is blocked), then submit
+  useEffect(() => {
+    if (!ready) return;
+    formRef.current?.querySelector("button")?.focus();
+    formRef.current?.submit();
+  }, [ready]);
   useEffect(() => { if (error) errRef.current?.focus(); }, [error]);
 
   const click = () => {
@@ -37,6 +42,7 @@ export function PayNow({ invoiceId, amountLabel, amountCents, invoiceNumber }: {
     <div>
       <p className="mb-3">You will be taken to PayFast to pay <strong>{amountLabel}</strong>.</p>
       {error && <Notice ref={errRef} tone="error" focusable>{error}</Notice>}
+      <noscript><p className="mb-3 text-ink-muted">The Pay now button needs JavaScript. If it does not work, contact the practice or pay by EFT.</p></noscript>
       {ready ? (
         <form ref={formRef} method="post" action={ready.action}>
           {Object.entries(ready.fields).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}

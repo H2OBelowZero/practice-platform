@@ -17,7 +17,10 @@ const asAnon = async <T>(c: Client, fn: () => Promise<T>) => {
   await c.query("set local role anon");
   try { return await fn(); } finally { await c.query("reset role"); }
 };
-const rows = async (c: Client, u: string, table: string) => (await as(c, u, `select * from ${table}`)).rows;
+// 0018: credit_notes grants `authenticated` only these columns (reason / created_by are served by credit_note_details to staff), so `select *` is
+// "permission denied" for every signed-in user; the sweep reads the granted columns, which is all row visibility needs.
+const COLUMNS: Record<string, string> = { credit_notes: "id, invoice_id, amount_cents, portion, created_at" };
+const rows = async (c: Client, u: string, table: string) => (await as(c, u, `select ${COLUMNS[table] ?? "*"} from ${table}`)).rows;
 const publicTables = async (c: Client, kinds = ["r"]) => (await c.query(
   "select c.relname n from pg_class c join pg_namespace s on s.oid = c.relnamespace where s.nspname = 'public' and c.relkind = any($1) order by 1", [kinds])).rows.map((r) => r.n as string);
 

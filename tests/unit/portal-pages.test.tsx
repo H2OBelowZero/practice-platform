@@ -101,6 +101,31 @@ describe("/portal/payments", () => {
     expect(out).toContain("/portal/payments/" + A + "/receipts/" + PAY);
   });
 
+  it("I1: when the PayFast return URL names an invoice that is still unpaid, ONLY the confirming panel is shown for it: a Refresh link and no Pay now (no second payment)", async () => {
+    h.db.invoice_balances = [inv({}), inv({ id: B, number: "INV-00002" })];
+    const out = await list({ paid: A });
+    expect(out).toContain("confirming your payment");
+    expect(out).toContain(`href="/portal/payments?paid=${A}">Refresh</a>`);
+    // exactly one Pay now (the other invoice), and the highlighted card says what is going on instead
+    expect(out.match(/Pay now<\/button>/g)?.length).toBe(1);
+    expect(out).toContain("Waiting for confirmation of your payment");
+    expect(out).toContain(`pay <strong>R 950,00</strong>`);
+  });
+  it("I1: not highlighted => Pay now as normal; highlighted and paid => thank-you and no Pay now for it", async () => {
+    expect(await list()).toMatch(/Pay now<\/button>/);
+    expect(await list({ paid: B })).toMatch(/Pay now<\/button>/); // an id that is not the user's changes nothing
+    h.db.invoice_balances = [inv({ status: "paid", outstanding_cents: 0 })];
+    h.db.payments = [{ id: PAY, invoice_id: A, method: "payfast", amount_cents: 95000, received_on: "2031-03-05" }];
+    const out = await list({ paid: A });
+    expect(out).toContain("Paid, thank you.");
+    expect(out).not.toContain("Pay now");
+  });
+  it("M2: an old medical aid invoice gets the neutral sentence instead of the 'still processing' one", async () => {
+    h.db.invoice_balances = [inv({ payer_type: "medical_aid", issue_date: "2000-01-01", due_date: "2000-01-15", total_cents: 100000, scheme_portion_cents: 100000, patient_portion_cents: 0, outstanding_cents: 100000 })];
+    const out = await list();
+    expect(out).toContain("This invoice can&#x27;t be paid online yet. Please contact the practice if you have any questions.");
+    expect(out).not.toContain("still processing");
+  });
   it("the return page never marks anything paid by itself: a query string alone on an unpaid invoice stays 'confirming'", async () => {
     const out = await list({ paid: A });
     expect(out).not.toContain("Paid, thank you.");
@@ -143,7 +168,7 @@ describe("/portal/payments", () => {
 });
 
 describe("/portal/payments/[invoiceId]", () => {
-  const detail = (id = A) => render(PortalInvoice({ params: Promise.resolve({ invoiceId: id }) }));
+  const detail = (id = A, sp: { paid?: string } = {}) => render(PortalInvoice({ params: Promise.resolve({ invoiceId: id }), searchParams: Promise.resolve(sp) }));
   const withLines = () => {
     h.db.invoices = [inv({})];
     h.db.invoice_lines = [{ id: "l1", description: "Therapy session", quantity: 2, unit_cents: 47500 }];
@@ -189,6 +214,28 @@ describe("/portal/payments/[invoiceId]", () => {
     await expect(detail("nope")).rejects.toThrow(/NEXT_HTTP_ERROR_FALLBACK;404|NEXT_NOT_FOUND/);
   });
 
+  it("I1: ?paid=<this invoice> while it is unpaid: the confirming panel and a Refresh link replace Pay now", async () => {
+    withLines();
+    const out = await detail(A, { paid: A });
+    expect(out).toContain("confirming your payment");
+    expect(out).toContain(`href="/portal/payments/${A}?paid=${A}">Refresh</a>`);
+    expect(out).not.toContain("Pay now");
+    // a different or no ?paid= leaves Pay now alone
+    expect(await detail(A, { paid: B })).toMatch(/Pay now<\/button>/);
+    expect(await detail(A)).toMatch(/Pay now<\/button>/);
+  });
+  it("I1: ?paid=<this invoice> once it is paid: thank-you", async () => {
+    h.db.invoices = [inv({ status: "paid" })]; h.db.invoice_lines = [];
+    h.db.payments = [{ id: PAY, method: "payfast", reference: null, gateway_ref: "PF-1", amount_cents: 95000, received_on: "2031-03-05" }];
+    expect(await detail(A, { paid: A })).toContain("Paid, thank you.");
+  });
+  it("M1: when part of the invoice could not be loaded the figures cannot be trusted, so there is no Pay now", async () => {
+    withLines();
+    h.failTable = "invoice_lines";
+    const out = await detail();
+    expect(out).toContain("could not be loaded");
+    expect(out).not.toContain("Pay now");
+  });
   it("a guardian sees whom the invoice is for", async () => {
     h.role = "guardian"; withLines();
     h.db.patients = [{ id: "pat", first_name: "Sipho", last_name: "D", user_id: "x" }];

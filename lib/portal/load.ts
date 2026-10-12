@@ -35,7 +35,7 @@ export async function loadPortalPayments(sb: SupabaseClient, userId: string, tod
 /** The pieces of ONE invoice that the checkout decision needs, read through RLS (null when the user cannot see it). */
 export async function loadInvoiceForCheckout(sb: SupabaseClient, invoiceId: string) {
   const inv = await sb.from("invoices")
-    .select("id, number, patient_id, status, payer_type, total_cents, scheme_portion_cents, patient_portion_cents").eq("id", invoiceId).neq("status", "draft").maybeSingle();
+    .select("id, number, patient_id, status, payer_type, issue_date, total_cents, scheme_portion_cents, patient_portion_cents").eq("id", invoiceId).neq("status", "draft").maybeSingle();
   if (inv.error) fail("invoice", inv.error);
   if (!inv.data) return null;
   const [pay, cr] = await Promise.all([
@@ -45,7 +45,7 @@ export async function loadInvoiceForCheckout(sb: SupabaseClient, invoiceId: stri
   if (pay.error) fail("payments", pay.error);
   if (cr.error) fail("credits", cr.error);
   return {
-    invoice: inv.data as unknown as { id: string; number: string; patient_id: string; status: string; payer_type: string; total_cents: number; scheme_portion_cents: number; patient_portion_cents: number },
+    invoice: inv.data as unknown as { id: string; number: string; patient_id: string; status: string; payer_type: string; issue_date: string; total_cents: number; scheme_portion_cents: number; patient_portion_cents: number },
     payments: (pay.data ?? []).map((p) => ({ method: String(p.method), amountCents: Number(p.amount_cents) })),
     credits: (cr.data ?? []).map((c) => ({ portion: String(c.portion), amountCents: Number(c.amount_cents) })),
   };

@@ -6,7 +6,7 @@ import { formatZar } from "@/lib/money";
 import { payfastAvailable } from "@/lib/payments/payfast";
 import { loadPortalPayments } from "@/lib/portal/load";
 import {
-  DEFAULT_PAYMENT_INSTRUCTIONS, hasPortalReceipt, orderInvoices, PAY_ONLINE_UNAVAILABLE, parsePaidParam, payNowReasonText, RETURN_TEXT, returnState, summarise,
+  DEFAULT_PAYMENT_INSTRUCTIONS, hasPortalReceipt, hidePayNow, orderInvoices, PAY_ONLINE_UNAVAILABLE, parsePaidParam, RETURN_TEXT, returnState, summarise,
   type PortalInvoice,
 } from "@/lib/portal/payments";
 import { supabaseServer } from "@/lib/supabase/server";
@@ -74,11 +74,13 @@ export default async function PortalPayments({ searchParams }: { searchParams: P
         </dl>
         {i.open && (
           <div className="mt-4 rounded-xl bg-sunk p-4">
-            {i.payNow.allowed
-              ? online
-                ? <PayNow invoiceId={i.id} amountCents={i.payNow.amountCents} amountLabel={formatZar(i.payNow.amountCents)} invoiceNumber={i.number} />
-                : <p>{PAY_ONLINE_UNAVAILABLE}</p>
-              : <p>{payNowReasonText(i.payNow.reason)}</p>}
+            {hidePayNow(paidId, i.id, ret)
+              ? <p>Waiting for confirmation of your payment. Please do not pay again.</p> // I1: the PayFast return URL names this invoice
+              : i.payNow.allowed
+                ? online
+                  ? <PayNow invoiceId={i.id} amountCents={i.payNow.amountCents} amountLabel={formatZar(i.payNow.amountCents)} invoiceNumber={i.number} />
+                  : <p>{PAY_ONLINE_UNAVAILABLE}</p>
+                : <p>{i.noPayText}</p>}
           </div>
         )}
         <div className="mt-4"><LinkButton href={`/portal/payments/${i.id}`} variant="secondary" aria-label={`View invoice ${i.number}`}>View</LinkButton></div>
@@ -90,7 +92,12 @@ export default async function PortalPayments({ searchParams }: { searchParams: P
     <>
       <PageHeader title="Payments" description="What you owe, how to pay, and your receipts." />
 
-      {ret === "confirming" && <Notice tone="info" title="Confirming your payment">{RETURN_TEXT.confirming}</Notice>}
+      {ret === "confirming" && (
+        <Notice tone="info" title="Confirming your payment">
+          <p>{RETURN_TEXT.confirming}</p>
+          <p><Link href={`/portal/payments?paid=${paidId}`}>Refresh</Link></p>
+        </Notice>
+      )}
       {ret === "paid" && returned && (
         <Notice tone="success" title="Paid">
           <p>{RETURN_TEXT.paid} {returned.status === "paid" ? `Invoice ${returned.number} is now paid in full.` : `We have received your payment for invoice ${returned.number}.`} <Link href={`/portal/payments/${returned.id}`}>View the invoice and receipt</Link>.</p>
