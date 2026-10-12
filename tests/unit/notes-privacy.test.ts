@@ -60,17 +60,52 @@ it("page titles are fixed text (no patient name, no generateMetadata)", () => {
   }
 });
 
-it("audit calls in the note code carry an action, an entity and an id only (no detail argument)", () => {
-  const calls = noteFiles.flatMap((f) => [...read(f).matchAll(/\baudit\(([^)]*)\)/g)].map((m) => ({ f: rel(f), args: m[1] })));
-  expect(calls.map((c) => c.args)).toEqual(expect.arrayContaining(['"note.view", "clinical_notes", note.id']));
-  for (const c of calls) expect(c.args.split(",").length, `${c.f}: ${c.args}`).toBeLessThanOrEqual(3);
+/** the text of every call to `name(` in `src`, as its top-level arguments (parentheses, braces, brackets and quotes balanced) */
+function callArgs(src: string, name: string): string[][] {
+  const out: string[][] = [];
+  for (const m of src.matchAll(new RegExp(String.raw`\b${name.replace(".", String.raw`\.`)}\(`, "g"))) {
+    let depth = 1, i = m.index + m[0].length, cur = "", quote = "";
+    const args: string[] = [];
+    for (; i < src.length && depth > 0; i++) {
+      const ch = src[i];
+      if (quote) { cur += ch; if (ch === "\\") cur += src[++i]; else if (ch === quote) quote = ""; continue; }
+      if (ch === "\"" || ch === "'" || ch === "`") { quote = ch; cur += ch; continue; }
+      if (ch === "(" || ch === "{" || ch === "[") depth++;
+      if (ch === ")" || ch === "}" || ch === "]") { depth--; if (depth === 0) break; }
+      if (ch === "," && depth === 1) { args.push(cur.trim()); cur = ""; continue; }
+      cur += ch;
+    }
+    if (cur.trim()) args.push(cur.trim());
+    out.push(args);
+  }
+  return out;
+}
+
+it("the argument scanner handles nesting and quotes", () => {
+  expect(callArgs(`x audit("a,b", "c", f(1, 2), { p: [1, 2], q: "}" })`, "audit")).toEqual([["\"a,b\"", "\"c\"", "f(1, 2)", "{ p: [1, 2], q: \"}\" }"]]);
 });
 
-it("redirects and links carry ids and notice codes only, never text", () => {
-  for (const f of noteFiles) {
-    const src = read(f);
-    for (const m of src.matchAll(/(?:redirect|href=)\(?[`{"]([^`"]*(?:\$\{[^}]*\}[^`"]*)*)/g)) expect(m[1], `${rel(f)}: ${m[1]}`).not.toMatch(/content|risk|text|addendum\W*=|\.notes/i);
+it("audit calls in the note code carry an action, an entity, an id and at most a detail of ids (patient_id, version flag): never text", () => {
+  const calls = noteFiles.flatMap((f) => callArgs(read(f), "audit").map((args) => ({ f: rel(f), args })));
+  expect(calls.map((c) => c.args.slice(0, 3).join(", "))).toEqual(expect.arrayContaining(["\"note.view\", \"clinical_notes\", note.id", "\"note.create\", \"clinical_notes\", data.id as string"]));
+  expect(calls.length).toBeGreaterThanOrEqual(3);
+  for (const c of calls) {
+    expect(c.args.length, `${c.f}: ${c.args.join(" | ")}`).toBeLessThanOrEqual(4);
+    if (c.args[3]) expect(c.args[3].replace(/\s+/g, " "), c.f).toMatch(/^\{ patient_id: [\w.]+(, version: true)? \}$/);
   }
+});
+
+it("redirects, router pushes, location changes and links carry ids and notice codes only: no template placeholder names note text, risk, an addendum or a form value", () => {
+  const files = [...noteFiles, join(root, "app", "app", "calendar", "[id]", "page.tsx")];
+  const sinks = ["redirect", "router.push", "router.replace", "location.assign", "location.replace", "new URL", "hrefWith"];
+  const bad = /content|risk|notes\b|text|addendum|value|body|answer/i;
+  const placeholders = (s: string) => [...s.matchAll(/\$\{([^}]*)\}/g)].map((m) => m[1]);
+  for (const f of files) {
+    const src = read(f);
+    for (const name of sinks) for (const args of callArgs(src, name)) for (const p of placeholders(args.join(","))) expect(p, `${rel(f)} ${name}`).not.toMatch(bad);
+    for (const m of src.matchAll(/(?:href|location\.href)\s*=\s*\{?`([^`]*)`/g)) for (const p of placeholders(m[1])) expect(p, `${rel(f)} href`).not.toMatch(bad);
+  }
+  expect(callArgs(read(actions), "redirect").length).toBeGreaterThanOrEqual(4); // the scan really finds the action redirects
 });
 
 it("the note code never uses the service client or the outbox (nothing clinical is queued or written outside RLS)", () => {
@@ -87,7 +122,7 @@ it("the Clinical notes tab is for the psychologist only and the calendar link is
 
 it("database calls the note code makes are the ones audited in the Task 12 report (R34)", () => {
   const rpcs = noteFiles.flatMap((f) => [...read(f).matchAll(/\.rpc\(\s*"(\w+)"/g)].map((m) => m[1]));
-  expect(rpcs.sort()).toEqual(["add_addendum", "sign_note"]);
+  expect(rpcs.sort()).toEqual(["add_addendum", "raise_risk_task", "sign_note"]);
   const tables = new Set(noteFiles.flatMap((f) => [...read(f).matchAll(/\.from\("(\w+)"\)/g)].map((m) => m[1])));
-  expect([...tables].sort()).toEqual(["appointments", "clinical_notes", "note_addenda", "note_templates", "note_versions", "patients", "profiles", "tasks"]);
+  expect([...tables].sort()).toEqual(["appointments", "clinical_notes", "note_addenda", "note_templates", "note_versions", "patients", "profiles"]);
 });

@@ -426,7 +426,7 @@ describe("staff roles", () => {
                      "invoices", "payments", "credit_notes", "claim_payments", "claim_events", "audit_log", "icd10_codes", "tasks"])
       expect((await rows(c, w.psy, t)).length, t).toBeGreaterThanOrEqual(2);
     expect((await rows(c, w.psy, "clinical_notes")).length).toBe(2);
-    expect((await rows(c, w.psy, "note_versions")).length).toBe(2);
+    expect((await rows(c, w.psy, "note_versions")).length).toBe(4); // per note: the earlier draft text, and (0013) the text kept when it was signed
     expect((await rows(c, w.psy, "note_addenda")).length).toBe(2);
   }));
 

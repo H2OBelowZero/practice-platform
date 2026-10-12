@@ -31,7 +31,7 @@ it("only the psychologist can read notes, versions and addenda; templates are st
     ["patient", pu, 0, 0], ["guardian", gu, 0, 0]];
   for (const [role, u, expected, tpls] of cases) {
     for (const t of ["clinical_notes", "note_versions", "note_addenda"])
-      expect(await asUser(c, u, async () => (await c.query(`select 1 from ${t}`)).rowCount), `${role} ${t}`).toBe(expected);
+      expect(await asUser(c, u, async () => (await c.query(`select 1 from ${t}`)).rowCount), `${role} ${t}`).toBe(t === "note_versions" && expected ? 2 : expected); // 2: the earlier draft and (0013) the text kept at signing
     expect(await asUser(c, u, async () => (await c.query("select 1 from note_templates")).rowCount), `${role} templates`).toBe(tpls);
   }
   for (const t of ["clinical_notes", "note_versions", "note_addenda", "note_templates"])
@@ -170,7 +170,7 @@ it("inserted notes must be drafts authored by the caller", () => withClient(asyn
   await expect(ins(psy, "state", "'signed'")).rejects.toThrow(/draft/); // owner too
 }));
 
-it("drafts: author and patient are fixed, every content change keeps the previous content as a version", () => withClient(async (c) => {
+it("drafts: author and patient are fixed; a content change keeps the previous content as a version, throttled to one per author per 5 minutes (0013)", () => withClient(async (c) => {
   const { psy, n } = await mk(c);
   const other = (await c.query("insert into patients(first_name,last_name) values ('O','O') returning id")).rows[0].id;
   const psy2 = await mkUser(c, "psychologist");
@@ -178,14 +178,63 @@ it("drafts: author and patient are fixed, every content change keeps the previou
     await expect(c.query("update clinical_notes set patient_id=$2 where id=$1", [n, other])).rejects.toThrow(/immutable/);
     await expect(c.query("update clinical_notes set author_id=$2 where id=$1", [n, psy2])).rejects.toThrow(/immutable/);
     await c.query("update clinical_notes set content='{\"s\":\"x\"}' where id=$1", [n]); // unchanged: no version
-    await c.query("update clinical_notes set risk='{\"r\":1}' where id=$1", [n]);
+    await c.query("update clinical_notes set risk='{\"r\":1}' where id=$1", [n]); // risk only: no version
     for (const v of ["e1", "e2", "e3"]) await c.query("update clinical_notes set content=$2::jsonb where id=$1", [n, JSON.stringify({ s: v })]);
     const { rows } = await c.query("select version_no, content, saved_by from note_versions where note_id=$1 order by version_no", [n]);
-    expect(rows.map((r) => r.version_no)).toEqual([1, 2, 3]);
-    expect(rows.map((r) => r.content)).toEqual([{ s: "x" }, { s: "e1" }, { s: "e2" }]);
+    expect(rows.map((r) => r.content)).toEqual([{ s: "x" }]); // e1 and e2 arrived within 5 minutes of the first version by the same author: no new rows
     expect(rows.every((r) => r.saved_by === psy)).toBe(true);
     expect((await c.query("select content from clinical_notes where id=$1", [n])).rows[0].content).toEqual({ s: "e3" });
   });
+}));
+
+it("version throttle: a new row after 5 minutes or from another author; signing always keeps the last draft text", () => withClient(async (c) => {
+  const { psy, n } = await mk(c);
+  const psy2 = await mkUser(c, "psychologist");
+  const upd = (u: string, s: string) => asUser(c, u, () => c.query("update clinical_notes set content=$2::jsonb where id=$1", [n, JSON.stringify({ s })]));
+  const versions = async () => (await c.query("select version_no, content, saved_by from note_versions where note_id=$1 order by version_no", [n])).rows;
+  await upd(psy, "a"); await upd(psy, "b"); // v1 = {x}; the second is throttled
+  expect((await versions()).map((r) => r.content)).toEqual([{ s: "x" }]);
+  await upd(psy2, "c"); // another author: version of {b}
+  expect((await versions()).map((r) => [r.content, r.saved_by])).toEqual([[{ s: "x" }, psy], [{ s: "b" }, psy2]]);
+  await c.query("alter table note_versions disable trigger note_versions_no_change"); // owner-only, rolled back with the test
+  await c.query("update note_versions set saved_at = now() - interval '6 minutes' where note_id=$1", [n]);
+  await c.query("alter table note_versions enable trigger note_versions_no_change");
+  await upd(psy2, "d"); // same author as the newest row, but it is older than 5 minutes: version of {c}
+  expect((await versions()).map((r) => r.content)).toEqual([{ s: "x" }, { s: "b" }, { s: "c" }]);
+  await upd(psy2, "e"); // throttled again
+  expect((await versions()).length).toBe(3);
+  // signing: the text {e} was never kept as a version (throttled), the sign keeps it; the signed content is also the note's own content
+  await asUser(c, psy, async () => { await sign(c, n); });
+  expect((await versions()).map((r) => r.content)).toEqual([{ s: "x" }, { s: "b" }, { s: "c" }, { s: "e" }]);
+  expect((await c.query("select content from clinical_notes where id=$1", [n])).rows[0].content).toEqual({ s: "e" });
+}));
+
+it("signing keeps the text as a version when none exists yet", () => withClient(async (c) => {
+  const { psy, n } = await mk(c);
+  await asUser(c, psy, async () => { await sign(c, n); }); // the content never changed, so no version exists: signing writes one
+  expect((await c.query("select content from note_versions where note_id=$1", [n])).rows).toEqual([{ content: { s: "x" } }]);
+}));
+
+it("a note's appointment must belong to the note's patient, and an appointment has at most one note (0013)", () => withClient(async (c) => {
+  const { psy, p, tpl, ap, n } = await mk(c);
+  const other = (await c.query("insert into patients(first_name,last_name) values ('O','O') returning id")).rows[0].id;
+  const st = (await c.query("select id from session_types limit 1")).rows[0].id;
+  const apOther = (await c.query("insert into appointments(patient_id,session_type_id,starts_at,ends_at) values ($1,$2,'2030-01-08T08:00:00Z','2030-01-08T08:50:00Z') returning id", [other, st])).rows[0].id;
+  const ins = (patient: string, appt: string | null) => asUser(c, psy, () => c.query("insert into clinical_notes(patient_id,appointment_id,template_id,author_id) values ($1,$2,$3,$4)", [patient, appt, tpl, psy]));
+  await expect(ins(p, apOther)).rejects.toThrow(/appointment_patient_mismatch/);
+  await expect(ins(p, ap)).rejects.toThrow(/duplicate key|clinical_notes_appointment_once/); // mk() already made a note for ap
+  await ins(p, null); await ins(p, null); // notes without an appointment are unlimited
+  // moving a draft onto another patient's appointment is refused too
+  const second = await asUser(c, psy, async () => (await c.query("insert into clinical_notes(patient_id,template_id,author_id) values ($1,$2,$3) returning id", [p, tpl, psy])).rows[0].id);
+  await expect(asUser(c, psy, () => c.query("update clinical_notes set appointment_id=$2 where id=$1", [second, apOther]))).rejects.toThrow(/appointment_patient_mismatch/);
+  expect(n).toBeDefined();
+}));
+
+it("note audit rows carry the patient id (an id only); the sign and addendum rows too (0013)", () => withClient(async (c) => {
+  const { psy, p, n } = await mk(c);
+  await asUser(c, psy, async () => { await sign(c, n); await c.query("select add_addendum($1,'late')", [n]); });
+  const rows = (await c.query("select action, detail from audit_log where entity_id=$1 order by id", [n])).rows;
+  expect(rows).toEqual([{ action: "note.sign", detail: { patient_id: p } }, { action: "note.addendum", detail: { patient_id: p } }]);
 }));
 
 it("note_versions and note_addenda are append-only for everyone", () => withClient(async (c) => {
@@ -205,7 +254,7 @@ it("note_versions and note_addenda are append-only for everyone", () => withClie
   });
   for (const q of ["update note_versions set content='{}'", "delete from note_versions", "update note_addenda set content='z'", "delete from note_addenda"])
     await expect(c.query(q), q).rejects.toThrow(/append-only/); // even the owner
-  expect((await c.query("select count(*)::int n from note_versions")).rows[0].n).toBe(1);
+  expect((await c.query("select count(*)::int n from note_versions")).rows[0].n).toBe(2); // the draft text before the edit, and the text at signing (0013)
 }));
 
 it("non-psychologists cannot insert, update or delete notes or addenda", () => withClient(async (c) => {

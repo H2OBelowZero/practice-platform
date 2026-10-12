@@ -18,7 +18,7 @@ test.describe("clinical notes", () => {
 
     // 1. create a SOAP note from the patient's Clinical notes tab
     await psy.goto(`/app/patients/${RECORD}?tab=notes`);
-    await expect(psy.getByRole("heading", { name: "Clinical notes" })).toBeVisible();
+    await expect(psy.getByRole("heading", { level: 2, name: "Clinical notes" })).toBeVisible();
     await psy.getByRole("link", { name: "New note" }).click();
     await expect(psy.getByRole("heading", { level: 1, name: "New clinical note" })).toBeVisible();
     await psy.getByLabel("Template").selectOption({ label: "SOAP (Subjective, Objective, Assessment, Plan)" });
@@ -26,7 +26,7 @@ test.describe("clinical notes", () => {
     await psy.waitForURL(/\/app\/notes\/[0-9a-f-]{36}$/);
     const noteUrl = psy.url();
     await expect(psy).toHaveTitle(/Clinical note/); // no patient name in the title
-    await expect(psy.getByText("Draft")).toBeVisible();
+    await expect(psy.getByText("Draft", { exact: true })).toBeVisible();
 
     // 2. autosave after the 3 s pause, and the text survives a reload
     await psy.getByLabel("Subjective").fill(TEXT);

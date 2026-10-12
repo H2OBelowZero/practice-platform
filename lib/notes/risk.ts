@@ -13,5 +13,5 @@ export function riskTask(risk: Risk): { title: string; priority: "high" } | null
   return { title: "Risk flagged: professional assessment and follow-up required", priority: "high" as const };
 }
 
-/** `tasks.source` for a note's risk task: one per note and level, so a re-save (or a second tab) finds it instead of adding another. Ids and a level only. */
-export const riskSource = (noteId: string, level: "moderate" | "high"): string => `risk_flag:${noteId}:${level}`;
+/** `tasks.source` for a note's risk task: one per note (a unique index in the database), so a re-save, a second tab or a rise in level finds it instead of adding another. An id only. */
+export const riskSource = (noteId: string): string => `risk_flag:${noteId}`;

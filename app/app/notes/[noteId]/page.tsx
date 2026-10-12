@@ -54,7 +54,7 @@ export default async function NotePage({ params, searchParams }: { params: Promi
     .eq("id", id.data).maybeSingle();
   const note = data as unknown as Row | null;
   if (!note) notFound();
-  await audit("note.view", "clinical_notes", note.id);
+  await audit("note.view", "clinical_notes", note.id, { patient_id: note.patient_id });
 
   const fields = templateFields(note.note_templates?.schema);
   const content = sanitiseContent(fields.map((f) => f.key), note.content);

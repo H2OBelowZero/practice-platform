@@ -4,6 +4,7 @@ import { templateFields, templateKeys } from "@/lib/notes/templates";
 import { NOTE_ERROR, noteErrorText, noteSaveText } from "@/lib/notes/errors";
 import { addendumSchema, contentSchema, createSchema, riskSchema } from "@/lib/notes/input";
 import { pendingAppointments } from "@/lib/notes/pending";
+import { auditActionText, auditDetailText, patientAuditFilter } from "@/lib/patients/audit-view";
 import { autosaveReducer, initialAutosave } from "@/lib/forms/autosave";
 
 describe("templates", () => {
@@ -73,7 +74,7 @@ describe("messages and autosave text", () => {
     expect(noteErrorText("not_author")).toBe(NOTE_ERROR.notAuthor);
     expect(noteErrorText("note_not_signed")).toBe(NOTE_ERROR.notSigned);
     expect(noteErrorText("note is immutable")).toBe(NOTE_ERROR.closed);
-    expect(noteErrorText('duplicate key value violates "secret clinical text"')).toBe(NOTE_ERROR.generic);
+    expect(noteErrorText('syntax error near "secret clinical text"')).toBe(NOTE_ERROR.generic);
   });
   it("status line: Saving…, Saved at HH:MM, Could not save, reload when closed", () => {
     const t = () => "10:42";
@@ -100,5 +101,22 @@ describe("notes to complete (pure part)", () => {
   it("keeps attended appointments with no signed or amended note", () => {
     const rows = [row("none", []), row("null", null), row("draft", ["draft"]), row("signed", ["signed"]), row("amended", ["amended"]), row("mixed", ["draft", "signed"])];
     expect(pendingAppointments(rows).map((r) => r.id)).toEqual(["none", "null", "draft"]);
+  });
+});
+
+describe("patient Audit tab filter (0013)", () => {
+  const P = "11111111-1111-4111-8111-111111111111", S = "22222222-2222-4222-8222-222222222222";
+  it("builds the or-filter: entity ids, plus note events found by the patient id in their detail", () => {
+    expect(patientAuditFilter(P, [P, S])).toBe(`entity_id.in.(${P},${S}),and(entity.eq.clinical_notes,detail->>patient_id.eq.${P})`);
+  });
+  it("shows note actions in words and leaves the patient id out of the detail line", () => {
+    expect(auditActionText("note.view")).toBe("Opened a clinical note");
+    expect(auditActionText("note.sign")).toBe("Signed a clinical note");
+    expect(auditDetailText({ patient_id: P, version: true })).toBe("version: true");
+  });
+  it("a closed-note message says the note has already been signed", () => {
+    expect(NOTE_ERROR.closed).toMatch(/^This note has already been signed/);
+    expect(noteErrorText("appointment_patient_mismatch")).toBe(NOTE_ERROR.appointment);
+    expect(noteErrorText('duplicate key value violates unique constraint "clinical_notes_appointment_once"')).toBe(NOTE_ERROR.exists);
   });
 });

@@ -2,8 +2,8 @@ import { it, expect } from "vitest";
 import type { Client } from "pg";
 import { withClient, asUser, mkUser } from "./helpers";
 
-// R34: the exact statements app/app/notes/actions.ts and lib/notes/risk-task.ts send (through PostgREST) replayed as SQL against the current
-// rules, so a later migration that changes a rule breaks here rather than in production. No migration was added for Task 12.
+// R34: the exact statements app/app/notes/actions.ts and lib/notes/risk-task.ts (raise_risk_task) send (through PostgREST) replayed as SQL against the current
+// rules, so a later migration that changes a rule breaks here rather than in production. Migration 0013 (Task 12 fix round) hardened notes and risk tasks.
 async function mk(c: Client) {
   const psy = await mkUser(c, "psychologist"), psy2 = await mkUser(c, "psychologist", "psy2"), adm = await mkUser(c, "admin");
   const p = (await c.query("insert into patients(first_name,last_name) values ('P','Q') returning id")).rows[0].id;
@@ -32,21 +32,22 @@ it("saveNoteDraft: update .eq(state, draft) changes a draft (and versions the ol
     expect((await save("one")).rowCount).toBe(1);
     expect((await save("two")).rowCount).toBe(1);
     expect((await c.query("select version_no, content->>'subjective' as s, saved_by from note_versions where note_id=$1 order by version_no", [id])).rows)
-      .toEqual([{ version_no: 1, s: null, saved_by: m.psy }, { version_no: 2, s: "one", saved_by: m.psy }]); // each version holds the text BEFORE that save
+      .toEqual([{ version_no: 1, s: null, saved_by: m.psy }]); // the version holds the text BEFORE the save; the second save, 0 minutes later by the same author, is throttled (0013)
     await c.query("select sign_note($1)", [id]);
+    expect((await c.query("select content->>'subjective' as s from note_versions where note_id=$1 order by version_no desc limit 1", [id])).rows[0].s).toBe("two"); // signing kept the last draft text, which the throttle had not versioned (0013)
     expect((await save("three")).rowCount).toBe(0); // closed: no error, no row
     expect((await c.query("select content->>'subjective' as s from clinical_notes where id=$1", [id])).rows[0].s).toBe("two");
   });
 }));
 
-it("risk task: the psychologist's tasks insert (source risk_flag:<note>:<level>) works and the lookup finds it", () => withClient(async (c) => {
+it("risk task: raise_risk_task(p_note, p_level, p_title) as the psychologist creates one assigned task; the lookup of it works (0013)", () => withClient(async (c) => {
   const m = await mk(c);
   await asUser(c, m.psy, async () => {
     const id = (await create(c, m, m.psy)).rows[0].id;
-    const source = `risk_flag:${id}:high`;
-    expect((await c.query("select id from tasks where source=$1 limit 1", [source])).rowCount).toBe(0);
-    await c.query("insert into tasks(title,priority,patient_id,appointment_id,source) values ($1,'high',$2,$3,$4)", ["Risk flagged: professional assessment and follow-up required", m.p, m.ap, source]);
-    expect((await c.query("select priority, status, patient_id from tasks where source=$1", [source])).rows).toEqual([{ priority: "high", status: "open", patient_id: m.p }]);
+    const title = "Risk flagged: professional assessment and follow-up required";
+    await c.query("select raise_risk_task($1,'moderate',$2)", [id, title]);
+    expect((await c.query("select title, priority, status, patient_id, appointment_id, assignee, meta, source from tasks where source=$1", [`risk_flag:${id}`])).rows)
+      .toEqual([{ title, priority: "high", status: "open", patient_id: m.p, appointment_id: m.ap, assignee: m.psy, meta: { level: "moderate" }, source: `risk_flag:${id}` }]);
   });
   await expect(asUser(c, m.adm, () => c.query("select id from clinical_notes"))).resolves.toMatchObject({ rowCount: 0 });
 }));
@@ -66,10 +67,11 @@ it("signNote / addAddendum: sign_note is author-only and audited, add_addendum n
   expect((await c.query("select action, detail from audit_log where entity_id=$1 order by id", [id])).rows.map((x) => x.action)).toEqual(["note.sign", "note.addendum"]);
 }));
 
-it("the linking rule is app-side: the database itself would accept another patient's appointment, so createNote must check it", () => withClient(async (c) => {
+it("createNote's app check is backed by the database: another patient's appointment and a second note for one appointment are refused (0013)", () => withClient(async (c) => {
   const m = await mk(c);
-  // documents why app/app/notes/actions.ts validates appointment ownership and status before the insert (no FK/trigger enforces patient match)
-  await expect(asUser(c, m.psy, () => create(c, { p: m.other, tpl: m.tpl, ap: m.ap }, m.psy))).resolves.toBeDefined();
+  await expect(asUser(c, m.psy, () => create(c, { p: m.other, tpl: m.tpl, ap: m.ap }, m.psy))).rejects.toThrow(/appointment_patient_mismatch/);
+  await asUser(c, m.psy, () => create(c, m, m.psy)); // first note for this patient's appointment
+  await expect(asUser(c, m.psy, () => create(c, m, m.psy))).rejects.toThrow(/duplicate key/); // the app maps this to "a note already exists"
 }));
 
 it("version listing and the person lookup the note page makes are readable by the psychologist only", () => withClient(async (c) => {

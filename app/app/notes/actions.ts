@@ -56,7 +56,7 @@ export async function createNote(rawPatient: unknown, values: Values): Promise<A
   const { data, error } = await sb.from("clinical_notes")
     .insert({ patient_id: pid.data, appointment_id: appointment ?? null, template_id: tpl.id, author_id: me.userId, state: "draft" }).select("id").single();
   if (error || !data) return { error: noteErrorText(error?.message) };
-  await safely("note.create", () => audit("note.create", "clinical_notes", data.id as string));
+  await safely("note.create", () => audit("note.create", "clinical_notes", data.id as string, { patient_id: pid.data }));
   return redirect(`/app/notes/${data.id as string}`);
 }
 
@@ -80,7 +80,7 @@ export async function saveNoteDraft(rawId: unknown, rawContent: unknown, rawRisk
   if (error) { const text = noteErrorText(error.message); return { ok: false, error: text, ...(text === NOTE_ERROR.closed ? { closed: true as const } : {}) }; }
   if (!data?.length) return { ok: false, error: NOTE_ERROR.closed, closed: true };
 
-  const taskOk = await ensureRiskTask(sb, note, cleanRisk);
+  const taskOk = await ensureRiskTask(sb, note.id, cleanRisk);
   return { ok: true, at: new Date().toISOString(), ...(taskOk ? {} : { taskFailed: true as const }) };
 }
 
@@ -99,7 +99,7 @@ export async function signNote(rawId: unknown): Promise<ActionState> {
   if (!note) return { error: NOTE_ERROR.missing };
   if (note.state !== "draft") return redirect(`/app/notes/${note.id}`); // already signed (a double click or a second tab)
   if (isEmptyNote(sanitiseContent(templateKeys(note.note_templates?.schema), note.content))) return { error: NOTE_ERROR.empty };
-  if (!(await ensureRiskTask(sb, note, sanitiseRisk(note.risk)))) return { error: NOTE_ERROR.task };
+  if (!(await ensureRiskTask(sb, note.id, sanitiseRisk(note.risk)))) return { error: NOTE_ERROR.task };
 
   const { error } = await sb.rpc("sign_note", { p_note: note.id });
   if (error) return { error: noteErrorText(error.message) };
@@ -130,5 +130,6 @@ export async function loadNoteVersion(rawNote: unknown, rawVersion: unknown): Pr
   if (!note) return { ok: false, error: NOTE_ERROR.missing };
   const { data } = await sb.from("note_versions").select("content").eq("id", ver.data).eq("note_id", note.id).maybeSingle();
   if (!data) return { ok: false, error: NOTE_ERROR.missing };
+  await audit("note.view", "clinical_notes", note.id, { patient_id: note.patient_id, version: true }); // fail-closed like the note page: older text is not shown unrecorded
   return { ok: true, content: sanitiseContent(templateKeys(note.note_templates?.schema), data.content) };
 }

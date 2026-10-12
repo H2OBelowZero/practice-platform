@@ -15,8 +15,7 @@ it("the task never carries the risk notes or any diagnosis wording", () => {
   expect(t?.title).not.toMatch(/diagnos|suicid|depress/i);
 });
 
-it("the source marker is one per note and level, ids only", () => {
+it("the source marker is one per note, an id only", () => {
   const id = "11111111-1111-4111-8111-111111111111";
-  expect(riskSource(id, "high")).toBe(`risk_flag:${id}:high`);
-  expect(riskSource(id, "moderate")).not.toBe(riskSource(id, "high"));
+  expect(riskSource(id)).toBe(`risk_flag:${id}`);
 });

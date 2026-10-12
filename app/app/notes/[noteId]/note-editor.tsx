@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState, useTransition } from "react";
 import { autosaveReducer, hasUnsaved, initialAutosave } from "@/lib/forms/autosave";
 import { NOTE_AUTOSAVE_MS, NOTE_FIELD_MAX, type NoteContent, type NoteRisk } from "@/lib/notes/content";
-import { noteSaveText } from "@/lib/notes/errors";
+import { NOTE_ERROR, noteSaveText } from "@/lib/notes/errors";
 import { RISK_LABEL, RISK_LEVELS, type RiskLevel } from "@/lib/notes/risk";
 import type { NoteField } from "@/lib/notes/templates";
 import { sastTime } from "@/lib/time";
@@ -33,6 +33,7 @@ export function NoteEditor({ noteId, fields, initialContent, initialRisk }: { no
 
   const latest = useRef({ content: initialContent, risk: initialRisk });
   const stored = useRef(JSON.stringify(latest.current)); // exactly what the server last confirmed
+  const closed = useRef(false); // the server said the note is no longer a draft
   const busy = useRef(false); // a sign is under way: no more autosaves
   const inFlight = useRef(false); // one save at a time
   const phase = useRef(state.phase);
@@ -53,7 +54,7 @@ export function NoteEditor({ noteId, fields, initialContent, initialRisk }: { no
         dispatch({ type: "save_ok", at: r.at });
         return true;
       }
-      if (r.closed) { dispatch({ type: "save_conflict" }); setFormError(r.error); }
+      if (r.closed) { closed.current = true; dispatch({ type: "save_conflict" }); setFormError(r.error); }
       else dispatch({ type: "save_fail" });
     } catch {
       dispatch({ type: "save_fail" });
@@ -93,10 +94,19 @@ export function NoteEditor({ noteId, fields, initialContent, initialRisk }: { no
 
   useEffect(() => { if (formError) errorRef.current?.focus(); }, [formError]);
 
+  /** Back to editing: the Sign note button is rendered again, so focus goes back to it once it exists. */
+  const keepEditing = () => {
+    setConfirming(false);
+    requestAnimationFrame(() => document.getElementById("sign-button")?.focus());
+  };
+
   const confirmSign = () => {
     setFormError(null);
     startSign(async () => {
-      if (!(await flush())) { setFormError("The note could not be saved, so it was not signed. Your text is still on screen; please try again."); return; }
+      if (!(await flush())) {
+        setFormError(closed.current ? NOTE_ERROR.closed : "The note could not be saved, so it was not signed. Your text is still on screen; please try again.");
+        return;
+      }
       busy.current = true; // no autosave may land after the sign
       let message: string | undefined;
       try { message = (await signNote(noteId))?.error; } // success redirects: nothing comes back
@@ -109,9 +119,10 @@ export function NoteEditor({ noteId, fields, initialContent, initialRisk }: { no
   return (
     <div>
       {formError && <Notice ref={errorRef} tone="error" focusable><p>{formError}</p></Notice>}
-      {taskWarning && <Notice tone="warning"><p>The follow-up task for the risk flag could not be created. It will be tried again on the next save; if this stays, add a task yourself.</p></Notice>}
+      {taskWarning && <Notice tone="warning"><p>The follow-up task for the risk flag could not be created. It will be retried on your next edit or when you sign; if this stays, add a task yourself.</p></Notice>}
 
       <form onSubmit={(e) => e.preventDefault()} noValidate>
+        <fieldset disabled={signing} className="m-0 min-w-0 border-0 p-0">
         {fields.map((f) => (
           <Textarea key={f.key} id={`note-${f.key}`} label={f.label} hint={f.help || undefined} placeholder={f.placeholder || undefined} rows={7} maxLength={NOTE_FIELD_MAX}
                     value={content[f.key] ?? ""} onChange={(e) => touch({ content: { ...latest.current.content, [f.key]: e.target.value }, risk: latest.current.risk })} />
@@ -120,7 +131,7 @@ export function NoteEditor({ noteId, fields, initialContent, initialRisk }: { no
         <fieldset className="mb-6 rounded-card border border-line bg-surface p-5">
           <legend className="px-2 text-lg font-semibold">Risk</legend>
           <p className="mb-4 text-ink-muted">
-            Risk flags prompt your professional assessment; they do not diagnose. A moderate or high level adds a follow-up task to your task list. The task never contains your risk notes.
+            Risk flags prompt your professional assessment; they do not diagnose. A moderate or high level adds a follow-up task that only you can see. The task never contains your risk notes.
           </p>
           <Select id="risk-level" label="Risk level" value={risk.level}
                   onChange={(e) => touch({ content: latest.current.content, risk: { ...latest.current.risk, level: e.target.value as RiskLevel } })}>
@@ -130,9 +141,10 @@ export function NoteEditor({ noteId, fields, initialContent, initialRisk }: { no
                     hint="What you observed and the steps you are taking."
                     onChange={(e) => touch({ content: latest.current.content, risk: { ...latest.current.risk, notes: e.target.value } })} />
         </fieldset>
+        </fieldset>
 
         {!confirming ? (
-          <Button type="button" onClick={() => setConfirming(true)} disabled={state.phase === "conflict"}>Sign note</Button>
+          <Button id="sign-button" type="button" onClick={() => setConfirming(true)} disabled={state.phase === "conflict"}>Sign note</Button>
         ) : (
           <FocusOnMount id="sign-panel" className="rounded-card border-2 border-sage-700 bg-surface p-5">
             <div>
@@ -141,7 +153,7 @@ export function NoteEditor({ noteId, fields, initialContent, initialRisk }: { no
               <p className="mb-4 text-ink-muted">Your name and the time are recorded with the signature.</p>
               <div className="flex flex-wrap gap-3">
                 <Button type="button" onClick={confirmSign} loading={signing}>{signing ? "Signing…" : "Sign and lock note"}</Button>
-                <Button type="button" variant="secondary" onClick={() => setConfirming(false)} disabled={signing}>Keep editing</Button>
+                <Button type="button" variant="secondary" onClick={keepEditing} disabled={signing}>Keep editing</Button>
               </div>
             </div>
           </FocusOnMount>

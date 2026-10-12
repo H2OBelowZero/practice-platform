@@ -3,7 +3,8 @@ export const NOTE_ERROR = {
   generic: "We could not do that. Please try again.",
   invalid: "That request was not valid. Please refresh the page and try again.",
   missing: "We could not find that note.",
-  closed: "This note has been signed, so it can no longer be edited. Add an addendum to correct it.",
+  closed: "This note has already been signed, so it can no longer be edited. Add an addendum to correct it.",
+  exists: "A note has already been started for that appointment. Open it from the notes list.",
   empty: "Write something in the note before signing it.",
   notAuthor: "Only the author of a note can sign it.",
   notSigned: "An addendum can only be added to a signed note.",
@@ -16,6 +17,8 @@ export const NOTE_ERROR = {
 /** Map a database error (sign_note, add_addendum, notes_guard, RLS) to a message; unknown errors get the generic one. */
 export function noteErrorText(message: string | undefined | null): string {
   const m = message ?? "";
+  if (/appointment_patient_mismatch/.test(m)) return NOTE_ERROR.appointment;
+  if (/duplicate key|clinical_notes_appointment_once/.test(m)) return NOTE_ERROR.exists;
   if (/not_author/.test(m)) return NOTE_ERROR.notAuthor;
   if (/note_not_signed/.test(m)) return NOTE_ERROR.notSigned;
   if (/note not draftable|immutable|invalid_state_transition/.test(m)) return NOTE_ERROR.closed;
