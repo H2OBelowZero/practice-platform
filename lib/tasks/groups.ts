@@ -16,7 +16,9 @@ export const TASK_GROUPS = [
   { value: "manual", label: "Added by staff" },
 ] as const;
 export type TaskGroup = (typeof TASK_GROUPS)[number]["value"];
-export const TASK_GROUP_FILTERS = [{ value: "", label: "Any kind" }, ...TASK_GROUPS] as const;
+// the Kind filter also offers "payfast": only the unmatched PayFast payments (they are billing tasks, but the dashboard needs to point at exactly them)
+export type TaskFilterGroup = TaskGroup | "payfast";
+export const TASK_GROUP_FILTERS = [{ value: "", label: "Any kind" }, ...TASK_GROUPS.slice(0, 2), { value: "payfast", label: "Unmatched PayFast payments" }, ...TASK_GROUPS.slice(2)] as const;
 
 const BILLING_PREFIXES = ["payfast_unreconciled:", "overdue_invoice:"];
 
@@ -31,14 +33,15 @@ export function taskGroup(source: string | null | undefined): TaskGroup {
 }
 
 export const groupLabel = (g: TaskGroup): string => TASK_GROUPS.find((x) => x.value === g)?.label ?? "System";
-export const parseTaskGroup = (s: string | undefined): TaskGroup | "" => (TASK_GROUPS.some((g) => g.value === s) ? (s as TaskGroup) : "");
+export const parseTaskGroup = (s: string | undefined): TaskFilterGroup | "" => (TASK_GROUP_FILTERS.some((g) => g.value === s && s !== "") ? (s as TaskFilterGroup) : "");
 
 /**
  * PostgREST `.or(...)` argument selecting one group, or null for "any". Values are quoted so the colon in a source prefix is never read as syntax;
  * `*` is PostgREST's LIKE wildcard. The sources are constants here, never user input.
  */
-export function groupFilter(g: TaskGroup | ""): string | null {
+export function groupFilter(g: TaskFilterGroup | ""): string | null {
   switch (g) {
+    case "payfast": return 'source.like."payfast_unreconciled:*"';
     case "clinical": return 'source.like."risk_flag:*"';
     case "billing": return 'source.like."payfast_unreconciled:*",source.like."overdue_invoice:*",source.eq.claim_rejected';
     case "bookings": return "source.eq.late_cancel_fee";

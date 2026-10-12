@@ -83,6 +83,7 @@ describe("/app/tasks", () => {
 
   it("offers the Clinical risk filter to the psychologist only, and the admin's query is RLS-filtered like any other", async () => {
     expect(await page()).toContain('<option value="clinical">Clinical risk</option>');
+    expect(await page()).toContain('<option value="payfast">Unmatched PayFast payments</option>');
     h.role = "admin";
     const out = await page();
     expect(out).not.toContain('<option value="clinical">');

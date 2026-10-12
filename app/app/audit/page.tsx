@@ -7,7 +7,7 @@ import { ROLE_LABEL } from "@/lib/billing/list";
 import { auditActionText } from "@/lib/patients/audit-view";
 import { hrefWith, parsePage } from "@/lib/patients/list";
 import { supabaseServer } from "@/lib/supabase/server";
-import { Button, LinkButton } from "@/components/ui/button";
+import { AnchorButton, Button, LinkButton } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/field";
 import { Notice } from "@/components/ui/notice";
 import { PageHeader } from "@/components/ui/page-header";
@@ -36,7 +36,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
   await audit("audit.view", "audit_log", undefined, { filters: activeFilterNames(f), page });
 
   const sb = await supabaseServer();
-  const res = await applyAuditFilters(sb.from("audit_log").select("id, role, action, entity, entity_id, detail, at", { count: "exact" }), f)
+  const res = await applyAuditFilters(sb.from("audit_log").select("id, role, action, entity, entity_id, detail, at", { count: "exact" }), f, { hideViews: true })
     .order("at", { ascending: false }).order("id", { ascending: false }).range(from, to);
   if (res.error?.code === "PGRST103" && page > 1) redirect(here(1)); // a page past the end (hand-typed URL)
   const rows = (res.data ?? []) as Row[];
@@ -46,7 +46,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
 
   return (
     <>
-      <PageHeader title="Audit log" description="Who opened or changed what, and when (South African time). Details list ids, counts and field names, never what was written." actions={<LinkButton variant="secondary" href={exportHref}>Download as CSV</LinkButton>} />
+      <PageHeader title="Audit log" description="Who opened or changed what, and when (South African time). Details list ids, counts and field names, never what was written." actions={<AnchorButton variant="secondary" href={exportHref}>Download as CSV</AnchorButton>} />
 
       <form method="get" action="/app/audit" role="search" aria-label="Filter the audit log" className="mb-6 flex flex-wrap items-end gap-3">
         <div className="min-w-40 flex-1 [&>div]:mb-0">
@@ -75,7 +75,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
 
       {rows.length > 0 && (
         <>
-          <div className="overflow-x-auto rounded-card border border-line bg-surface shadow-card">
+          <div role="region" aria-label="Audit log table" tabIndex={0} className="overflow-x-auto rounded-card border border-line bg-surface shadow-card">
             <table className="w-full border-collapse text-left">
               <caption className="sr-only">Audit log, newest first</caption>
               <thead className="bg-sunk text-sm text-ink-muted">
@@ -107,7 +107,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
             </table>
           </div>
           <Pager page={page} pages={pages} total={total} from={from} to={to} hrefFor={here} label="Audit log pages" />
-          <p className="mt-3 text-sm text-ink-muted">The CSV holds the same filtered rows, newest first, up to {EXPORT_MAX_ROWS.toLocaleString("en-ZA")}. Downloading it is recorded in this log.</p>
+          <p className="mt-3 text-sm text-ink-muted">Opening this log is recorded as audit.view; those rows are left out of this list unless you choose the audit action filter. The CSV holds the same filtered rows, newest first, up to {EXPORT_MAX_ROWS.toLocaleString("en-ZA")}. Downloading it is recorded in this log.</p>
         </>
       )}
     </>

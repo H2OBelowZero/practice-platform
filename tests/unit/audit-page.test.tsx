@@ -80,6 +80,26 @@ describe("/app/audit", () => {
     expect(JSON.stringify(q.calls)).not.toContain("actor"); // the actor's id is not even selected
   });
 
+  it("leaves its own audit.view rows out of the list (so paging does not shift per click) unless the audit.* filter asks for them", async () => {
+    await page();
+    expect(called(h.log.find((x) => x.table === "audit_log")!, "neq", "action", "audit.view")).toBe(true);
+    h.log.length = 0;
+    await page({ prefix: "audit" });
+    const q = h.log.find((x) => x.table === "audit_log")!;
+    expect(q.calls.some((c) => c.m === "neq")).toBe(false);
+    expect(called(q, "like", "action", "audit.%")).toBe(true);
+    h.log.length = 0;
+    await page({ prefix: "patient" });
+    expect(called(h.log.find((x) => x.table === "audit_log")!, "neq", "action", "audit.view")).toBe(true);
+  });
+
+  it("the table can be scrolled with the keyboard (focusable named region) and the export is a plain download anchor, not a Link", async () => {
+    const out = await page({ prefix: "note" });
+    expect(out).toContain('role="region" aria-label="Audit log table" tabindex="0"');
+    const a = out.match(/<a [^>]*href="\/app\/audit\/export[^"]*"[^>]*>/)![0];
+    expect(a).toContain("download");
+  });
+
   it("offers the export link with the same filters, and an empty / failed state in plain words", async () => {
     expect(await page({ prefix: "note", role: "psychologist" })).toContain('href="/app/audit/export?prefix=note&amp;role=psychologist"');
     h.resolve = () => ({ data: [], count: 0 });
@@ -128,33 +148,89 @@ describe("/app/audit/export", () => {
     expect(h.audits).toHaveLength(0); // nothing was exported, nothing to record
   });
 
-  it("reads in pages of 1000 and stops at 5000 rows, saying so when there is more", async () => {
-    let n = 0;
-    h.resolve = (q) => {
-      const range = q.calls.find((c) => c.m === "range")!.a as number[];
-      if (range[0] === 5000) return { data: [{ id: 1 }] }; // the probe beyond the cap
-      n++; return { data: Array.from({ length: 1000 }, (_, i) => row(range[0] + i)) };
-    };
+  // a fake audit_log that holds N rows (newest first, id N..1) and answers the keyset filter the export sends
+  const keyset = (total: number, onRead?: (cursor: string | null, limit: number) => void) => (q: Query): Result => {
+    const limit = q.calls.find((c) => c.m === "limit")!.a[0] as number;
+    const or = q.calls.find((c) => c.m === "or")?.a[0] as string | undefined;
+    onRead?.(or ?? null, limit);
+    const lastId = or ? Number(/id\.lt\.(\d+)/.exec(or)![1]) : total + 1;
+    const out = [];
+    for (let id = lastId - 1; id >= 1 && out.length < limit; id--) out.push(row(id, { at: `2031-03-10T07:00:${String(id % 60).padStart(2, "0")}+00:00` }));
+    return { data: out };
+  };
+
+  it("reads with KEYSET paging (strictly after the last row of the previous chunk) in chunks of 1000 up to 5000 rows, and says so when there is more", async () => {
+    const reads: [string | null, number][] = [];
+    h.resolve = keyset(7300, (c, l) => reads.push([c, l]));
     const res = await get();
-    expect(n).toBe(5);
-    expect((await res.text()).trimEnd().split("\n")).toHaveLength(5001);
+    const lines = (await res.text()).trimEnd().split("\n");
+    expect(lines).toHaveLength(5001);
     expect(res.headers.get("X-Export-Truncated")).toBe("true");
     expect(h.audits[0][3]).toEqual({ filters: [], rows: 5000, truncated: true });
-    expect(h.log.map((x) => x.calls.find((c) => c.m === "range")!.a)).toEqual([[0, 999], [1000, 1999], [2000, 2999], [3000, 3999], [4000, 4999], [5000, 5000]]);
+    expect(reads.map((r) => r[1])).toEqual([1000, 1000, 1000, 1000, 1000, 1]); // five chunks and a probe for "more"
+    expect(reads[0][0]).toBeNull();
+    expect(reads[1][0]).toMatch(/^at\.lt\."2031-03-10T07:00:\d\d\+00:00",and\(at\.eq\."2031-03-10T07:00:\d\d\+00:00",id\.lt\.6301\)$/); // after id 6301, the 1000th row
+    expect(h.log.every((x) => !x.calls.some((c) => c.m === "range" || c.m === "offset"))).toBe(true);
   });
 
-  it("exactly 5000 rows is not truncated; a short last page ends the loop", async () => {
+  it("concurrent inserts cannot duplicate or skip rows: every later chunk starts after the previous chunk's last row, wherever new rows land", async () => {
+    const cursors: (string | null)[] = [];
+    let newest = 2500; // new audit rows keep arriving: each read adds 40 with HIGHER ids (offset paging would shift by 40 every chunk)
     h.resolve = (q) => {
-      const range = q.calls.find((c) => c.m === "range")!.a as number[];
-      if (range[0] === 5000) return { data: [] };
-      return { data: Array.from({ length: 1000 }, (_, i) => row(range[0] + i)) };
+      const limit = q.calls.find((c) => c.m === "limit")!.a[0] as number;
+      const or = q.calls.find((c) => c.m === "or")?.a[0] as string | undefined;
+      cursors.push(or ?? null);
+      const lastId = or ? Number(/id\.lt\.(\d+)/.exec(or)![1]) : newest + 1;
+      const out = [];
+      for (let id = lastId - 1; id >= 1 && out.length < limit; id--) out.push(row(id, { entity_id: null, entity: `e${id}` }));
+      newest += 40;
+      return { data: out };
     };
-    expect(((await get()).headers.get("X-Export-Truncated"))).toBe("false");
+    const lines = (await (await get()).text()).trimEnd().split("\n").slice(1);
+    const ids = lines.map((l) => Number(l.split(",")[3].slice(1)));
+    expect(ids).toHaveLength(2500);
+    expect(new Set(ids).size).toBe(2500); // no duplicates
+    expect(ids).toEqual(Array.from({ length: 2500 }, (_, i) => 2500 - i)); // none skipped, strictly descending
+    expect(cursors.map((c) => (c ? Number(/id\.lt\.(\d+)/.exec(c)![1]) : null))).toEqual([null, 1501, 501]);
+  });
+
+  it("exactly 5000 rows is not truncated; a short chunk ends the loop without a probe", async () => {
+    h.resolve = keyset(5000);
+    expect((await get()).headers.get("X-Export-Truncated")).toBe("false");
     h.log.length = 0;
-    h.resolve = (q) => ({ data: q.calls.find((c) => c.m === "range")!.a[0] === 0 ? Array.from({ length: 1000 }, (_, i) => row(i)) : [row(9999)] });
+    const reads: number[] = [];
+    h.resolve = keyset(1002, (_c, l) => reads.push(l));
     const res = await get();
-    expect((await res.text()).trimEnd().split("\n")).toHaveLength(1002);
-    expect(h.log).toHaveLength(2);
+    expect((await res.text()).trimEnd().split("\n")).toHaveLength(1003);
+    expect(reads).toEqual([1000, 1000]);
+  });
+
+  it("refuses a cursor that does not look like a timestamp rather than putting it in a filter", async () => {
+    h.resolve = (q) => (q.calls.some((c) => c.m === "or") ? { data: [] } : { data: Array.from({ length: 1000 }, (_, i) => row(5000 - i, { at: 'x",id.gt.0,or(a.eq."' })) });
+    const res = await get();
+    expect(res.status).toBe(500);
+    expect(h.audits).toHaveLength(0);
+  });
+
+  it("sends nosniff and no-store on the CSV and on a refusal", async () => {
+    for (const res of [await get(), (h.auditFails = true, await get())]) {
+      expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      expect(res.headers.get("Cache-Control")).toBe("no-store");
+    }
+  });
+
+  it("a prefetch / RSC request gets an empty 204 and nothing is read or audited", async () => {
+    for (const headers of [{ "next-router-prefetch": "1" }, { rsc: "1" }, { purpose: "prefetch" }, { "sec-purpose": "prefetch;prerender" }, { Purpose: "Prefetch" }] as Record<string, string>[]) {
+      h.log.length = 0; h.audits.length = 0;
+      const res = await GET(new Request("http://localhost:3000/app/audit/export", { headers }));
+      expect(res.status, JSON.stringify(headers)).toBe(204);
+      expect(await res.text()).toBe("");
+      expect(h.log).toHaveLength(0);
+      expect(h.audits).toHaveLength(0);
+    }
+    // a prefetch is still not served to the wrong role
+    h.role = "admin";
+    await expect(GET(new Request("http://localhost:3000/app/audit/export", { headers: { rsc: "1" } }))).rejects.toThrow("NOT_FOUND");
   });
 
   it("an empty export is just the header", async () => {

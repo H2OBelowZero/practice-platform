@@ -17,6 +17,11 @@ describe("toCsv", () => {
     expect(csvCell("=HYPERLINK(\"http://x\",\"y\")")).toBe('"\'=HYPERLINK(""http://x"",""y"")"');
     expect(csvCell("a=b")).toBe("a=b"); // only the first character matters
   });
+  it("also catches a formula behind leading blanks and a leading line feed", () => {
+    for (const s of [" =1+1", "  @SUM(A1)", "\t=1", "\n=cmd", " \t+27821234567", " -5"]) expect(csvCell(s).replace(/^"/, ""), JSON.stringify(s)).toMatch(/^'/);
+    expect(csvCell("\n=cmd")).toBe("\"'\n=cmd\""); // quoted because of the line feed
+    for (const s of ["hello", " hello", "a =b", "1-2", "x@y.co", ""]) expect(csvCell(s)).toBe(s);
+  });
   it("leaves numbers alone (a negative number is data, not a formula) and writes null as empty", () => {
     expect(toCsv([{ n: -5, m: 12.5, z: null }])).toBe("n,m,z\n-5,12.5,");
   });

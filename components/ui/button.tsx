@@ -32,3 +32,12 @@ export function Button({ variant = "primary", loading = false, disabled, classNa
 export function LinkButton({ variant = "primary", className, ...rest }: ComponentProps<typeof Link> & { variant?: ButtonVariant }) {
   return <Link className={buttonClass(variant, className)} {...rest} />;
 }
+
+/**
+ * A plain `<a>` that looks like a button, for a file DOWNLOAD (a CSV export). Never a next/link: Link can prefetch and soft-navigate, which would run the
+ * download route (and, for the audit export, write an audit row and read thousands of rows) without anyone clicking. tests/unit/no-link-to-export.test.ts
+ * fails the build if a Link or LinkButton points at an /export route.
+ */
+export function AnchorButton({ variant = "primary", className, ...rest }: ComponentProps<"a"> & { variant?: ButtonVariant }) {
+  return <a download className={buttonClass(variant, className)} {...rest} />;
+}

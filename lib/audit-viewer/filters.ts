@@ -26,11 +26,13 @@ export const activeFilterNames = (f: AuditFilters): string[] => (Object.keys(f) 
 /** The query-string parameters for links, the pager and the export (empty ones left out by hrefWith). */
 export const filterParams = (f: AuditFilters): Record<string, string> => ({ prefix: f.prefix, entity: f.entity, role: f.role, from: f.from, to: f.to });
 
-type Chain = { like(c: string, p: string): Chain; eq(c: string, v: string): Chain; gte(c: string, v: string): Chain; lt(c: string, v: string): Chain };
+type Chain = { like(c: string, p: string): Chain; neq(c: string, v: string): Chain; eq(c: string, v: string): Chain; gte(c: string, v: string): Chain; lt(c: string, v: string): Chain };
 
 /** Apply the filters to a PostgREST query builder (the page query and the export query share this). The date range is in SAST: from the start of `from` up to the end of `to`. */
-export function applyAuditFilters<Q>(q: Q, f: AuditFilters): Q {
+export function applyAuditFilters<Q>(q: Q, f: AuditFilters, opts: { hideViews?: boolean } = {}): Q {
   let out = q as unknown as Chain;
+  // the viewer writes an audit.view row on every page view; counting it would shift every offset page by one per click, so it is left out unless the audit.* filter asks for it
+  if (opts.hideViews && f.prefix !== "audit") out = out.neq("action", "audit.view");
   if (f.prefix) out = out.like("action", `${f.prefix}.%`);
   if (f.entity) out = out.eq("entity", f.entity);
   if (f.role) out = out.eq("role", f.role);
@@ -42,3 +44,9 @@ export function applyAuditFilters<Q>(q: Q, f: AuditFilters): Q {
 export const EXPORT_MAX_ROWS = 5000;
 /** PostgREST returns at most this many rows per request on Supabase, so an export reads in pages of it. */
 export const EXPORT_CHUNK = 1000;
+
+/** True for a request a browser or the Next router makes to warm a link (prefetch / RSC), as opposed to a person's click on a download. */
+export function isPrefetch(h: { get(name: string): string | null }): boolean {
+  const v = (n: string) => (h.get(n) ?? "").toLowerCase();
+  return h.get("next-router-prefetch") !== null || h.get("rsc") !== null || v("purpose").includes("prefetch") || v("sec-purpose").includes("prefetch");
+}

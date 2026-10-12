@@ -16,7 +16,7 @@ test.describe("psychologist dashboard", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(/Good (morning|afternoon|evening)/);
     for (const label of ["Today's sessions", "Awaiting action", "Outstanding invoices", "Notes to complete", "Unreconciled PayFast payments", "Claims needing attention"])
       await expect(page.getByText(label, { exact: true }).first()).toBeVisible();
-    for (const h of ["Today's schedule", "Booking requests", "New patient enquiries", "Coming up in the next 7 days", "Open tasks", "Shortcuts"])
+    for (const h of ["Today's schedule", "Booking requests", "New patient enquiries", "Coming up: the 7 days after today", "Open tasks", "Shortcuts"])
       await expect(page.getByRole("heading", { name: h })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^Payments received in / })).toBeVisible();
 

@@ -5,7 +5,7 @@ export const PRIORITIES = [{ value: "high", label: "High" }, { value: "normal", 
 export const PRIORITY_FILTERS = [{ value: "", label: "Any priority" }, ...PRIORITIES] as const;
 export const DUE_FILTERS = [
   { value: "", label: "Any due date" }, { value: "overdue", label: "Overdue" }, { value: "now", label: "Due today or overdue" }, { value: "today", label: "Due today" },
-  { value: "week", label: "Due in the next 7 days" }, { value: "none", label: "No due date" },
+  { value: "week", label: "Due in the next 7 days (including today)" }, { value: "none", label: "No due date" },
 ] as const;
 export type TaskDueFilter = "overdue" | "now" | "today" | "week" | "none";
 
@@ -16,13 +16,13 @@ export const parseTaskDue = (s: string | undefined): TaskDueFilter | "" => (DUE_
 export const PRIORITY_RANK: Record<string, number> = { high: 0, normal: 1, low: 2 };
 export const PRIORITY_LABEL: Record<string, string> = { high: "High priority", normal: "Normal priority", low: "Low priority" };
 
-/** Due-date bounds (UTC instants) for a "due" filter; every date is a SAST calendar day. `week` = today up to and including today + 7. */
+/** Due-date bounds (UTC instants) for a "due" filter; every date is a SAST calendar day. `week` = the 7 days today .. today + 6 (inclusive). */
 export function dueBounds(f: TaskDueFilter, today: string): { gte?: string; lt?: string; isNull?: true } {
   const start = sastMidnight(today);
   if (f === "overdue") return { lt: start };
   if (f === "now") return { lt: sastMidnight(addDays(today, 1)) };
   if (f === "today") return { gte: start, lt: sastMidnight(addDays(today, 1)) };
-  if (f === "week") return { gte: start, lt: sastMidnight(addDays(today, 8)) };
+  if (f === "week") return { gte: start, lt: sastMidnight(addDays(today, 7)) };
   return { isNull: true };
 }
 

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { groupFilter, groupLabel, isPayfastUnreconciled, parseTaskGroup, payfastDetails, taskExplanation, taskGroup, TASK_GROUPS } from "@/lib/tasks/groups";
+import { TASK_GROUP_FILTERS, groupFilter, groupLabel, isPayfastUnreconciled, parseTaskGroup, payfastDetails, taskExplanation, taskGroup, TASK_GROUPS } from "@/lib/tasks/groups";
 import { taskLink } from "@/lib/tasks/links";
 import {
-  createTaskSchema, dueBounds, isTaskDueToday, isTaskOverdue, parseTaskDue, parseTaskPriority, parseTaskStatus, safeTasksBack, sortTasks, updateTaskSchema,
+  createTaskSchema, DUE_FILTERS, dueBounds, isTaskDueToday, isTaskOverdue, parseTaskDue, parseTaskPriority, parseTaskStatus, safeTasksBack, sortTasks, updateTaskSchema,
 } from "@/lib/tasks/list";
 import { sastMidnight } from "@/lib/time";
 
@@ -96,9 +96,27 @@ describe("list helpers", () => {
     expect(dueBounds("overdue", today)).toEqual({ lt: sastMidnight("2031-03-10") });
     expect(dueBounds("now", today)).toEqual({ lt: sastMidnight("2031-03-11") });
     expect(dueBounds("today", today)).toEqual({ gte: sastMidnight("2031-03-10"), lt: sastMidnight("2031-03-11") });
-    expect(dueBounds("week", today)).toEqual({ gte: sastMidnight("2031-03-10"), lt: sastMidnight("2031-03-18") });
+    expect(dueBounds("week", today)).toEqual({ gte: sastMidnight("2031-03-10"), lt: sastMidnight("2031-03-17") });
     expect(dueBounds("none", today)).toEqual({ isNull: true });
     expect(sastMidnight("2031-03-10")).toBe("2031-03-09T22:00:00.000Z");
+  });
+  it("'the next 7 days' is today through today + 6: the boundary days", () => {
+    const { gte, lt } = dueBounds("week", "2031-03-10");
+    const inWeek = (day: string) => sastMidnight(day) >= gte! && sastMidnight(day) < lt!;
+    expect(inWeek("2031-03-09")).toBe(false); // yesterday
+    expect(inWeek("2031-03-10")).toBe(true); // today
+    expect(inWeek("2031-03-16")).toBe(true); // today + 6, the 7th day
+    expect(inWeek("2031-03-17")).toBe(false); // today + 7
+    expect(DUE_FILTERS.find((d) => d.value === "week")?.label).toBe("Due in the next 7 days (including today)");
+    const w = dueBounds("week", "2031-03-28"); // across a month end
+    expect(w.lt).toBe(sastMidnight("2031-04-04"));
+  });
+  it("only the unmatched PayFast payments can be filtered on their own", () => {
+    expect(parseTaskGroup("payfast")).toBe("payfast");
+    expect(groupFilter("payfast")).toBe('source.like."payfast_unreconciled:*"');
+    expect(TASK_GROUP_FILTERS.map((g) => g.value)).toEqual(["", "clinical", "billing", "payfast", "bookings", "forms", "system", "manual"]);
+    expect(taskGroup("payfast_unreconciled:5")).toBe("billing"); // still labelled as a billing task
+    expect(parseTaskGroup("payfast;drop")).toBe("");
   });
   it("overdue and due-today use the SAST day, only for open tasks", () => {
     const due = sastMidnight("2031-03-10");

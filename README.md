@@ -217,6 +217,6 @@ Not verified without a live setup: a real provider call, the Vercel schedule its
 - `/app/tasks` (psychologist, admin): filters by status, priority, due date and kind (`lib/tasks/groups.ts` classifies the task sources), create / edit /
   complete / reopen (audited `task.create`, `task.update`, `task.complete`, `task.reopen`: ids and field names only). Clinical-risk tasks exist only for the psychologist (RLS).
 - `/app/audit` (psychologist only): filters, 50 per page, whitelisted detail (`lib/audit-viewer/detail.ts`), CSV at `/app/audit/export` (max 5000 rows, formulas
-  neutralised by `lib/reports/csv.ts`). Viewing writes `audit.view` and exporting writes `export.audit`; both fail closed. A 5 000 row export is read in pages of
+  neutralised by `lib/reports/csv.ts`; sent with `nosniff`). The control is a plain `<a download>` (never a next/link, which would prefetch and run the export; a prefetch/RSC request gets an empty 204). Viewing writes `audit.view` and exporting writes `export.audit`; both fail closed. A 5 000 row export is read with keyset paging in chunks of
   1 000 because the API caps a response.
 - Reports and Settings are hidden in the navigation until Task 16b adds their pages (`ready: false` in `lib/nav.ts`).

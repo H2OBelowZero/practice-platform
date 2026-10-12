@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { AUDIT_DETAIL_KEYS, auditDetailParts, auditDetailSummary, auditTime, shortEntityId } from "@/lib/audit-viewer/detail";
-import { activeFilterNames, applyAuditFilters, AUDIT_ENTITIES, AUDIT_PREFIXES, filterParams, parseAuditFilters } from "@/lib/audit-viewer/filters";
+import { activeFilterNames, applyAuditFilters, AUDIT_ENTITIES, AUDIT_PREFIXES, filterParams, isPrefetch, parseAuditFilters } from "@/lib/audit-viewer/filters";
 import { toCsv } from "@/lib/reports/csv";
 
 const P = "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d";
@@ -112,5 +112,22 @@ describe("audit export rows", () => {
     const rows = [{ time_sast: "2031-03-10 14:30", role: "psychologist", action: "=cmd|' /C calc'!A0", entity: "patients", entity_id: P.slice(0, 8), detail: "fields: first_name, phone" }];
     const out = toCsv(rows);
     expect(out.split("\n")[1]).toBe(`2031-03-10 14:30,psychologist,'=cmd|' /C calc'!A0,patients,9a1b2c3d,"fields: first_name, phone"`);
+  });
+});
+
+describe("hideViews and prefetch detection", () => {
+  const rec = () => { const calls: string[] = []; const q: Record<string, unknown> = {}; for (const m of ["like", "neq", "eq", "gte", "lt"]) q[m] = (c: string, v: string) => (calls.push(`${m} ${c} ${v}`), q); return { q, calls }; };
+  it("leaves audit.view out unless asked, and only for the viewer", () => {
+    const a = rec(); applyAuditFilters(a.q, parseAuditFilters({}), { hideViews: true });
+    expect(a.calls).toEqual(["neq action audit.view"]);
+    const b = rec(); applyAuditFilters(b.q, parseAuditFilters({ prefix: "audit" }), { hideViews: true });
+    expect(b.calls).toEqual(["like action audit.%"]);
+    const c = rec(); applyAuditFilters(c.q, parseAuditFilters({}));
+    expect(c.calls).toEqual([]); // the export keeps every row
+  });
+  it("recognises the headers a router or browser sends when warming a link", () => {
+    const h = (o: HeadersInit) => new Headers(o);
+    for (const o of [{ "next-router-prefetch": "1" }, { rsc: "1" }, { purpose: "prefetch" }, { "sec-purpose": "prefetch;prerender" }] as Record<string, string>[]) expect(isPrefetch(h(o)), JSON.stringify(o)).toBe(true);
+    for (const o of [{}, { accept: "text/csv" }, { purpose: "navigate" }, { "sec-fetch-dest": "document" }] as Record<string, string>[]) expect(isPrefetch(h(o)), JSON.stringify(o)).toBe(false);
   });
 });

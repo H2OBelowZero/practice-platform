@@ -19,7 +19,7 @@ type ApptRow = {
   patients: { first_name: string; last_name: string } | { first_name: string; last_name: string }[] | null;
   session_types: { name: string; format: string } | { name: string; format: string }[] | null;
 };
-export type DashAppt = { id: string; starts_at: string; minutes: number; status: string; patientName: string; patientId: string; typeName: string; format: string };
+export type DashAppt = { id: string; starts_at: string; minutes: number; status: string; patientName: string; patientId: string; typeName: string; format: string; past?: boolean };
 const APPT_COLS = "id, starts_at, ends_at, status, patient_id, patients(first_name, last_name), session_types(name, format)";
 const apptOf = (r: ApptRow): DashAppt => ({
   id: r.id, starts_at: r.starts_at, minutes: minutesBetween(r.starts_at, r.ends_at), status: r.status, patientId: r.patient_id,
@@ -33,10 +33,10 @@ export const loadToday = (sb: SupabaseClient, today: string) => section("today",
   return (data as unknown as ApptRow[]).map(apptOf);
 });
 
-/** Tentative booking requests that have not started yet: the total and the first few by date. */
+/** Every tentative booking request, earliest first: one whose start time has already passed is kept (flagged `past`) because it still needs a decision. */
 export const loadRequests = (sb: SupabaseClient, now: Date) => section("requests", async () => {
-  const { data, count } = must(await sb.from("appointments").select(APPT_COLS, { count: "exact" }).eq("status", "tentative").gte("starts_at", now.toISOString()).order("starts_at").limit(8));
-  return { total: count ?? data.length, items: (data as unknown as ApptRow[]).map(apptOf) };
+  const { data, count } = must(await sb.from("appointments").select(APPT_COLS, { count: "exact" }).eq("status", "tentative").order("starts_at").limit(8));
+  return { total: count ?? data.length, items: (data as unknown as ApptRow[]).map((r): DashAppt => ({ ...apptOf(r), past: Date.parse(r.starts_at) < now.getTime() })) };
 });
 
 /** Confirmed and tentative sessions over the 7 days after today (at most 20). */

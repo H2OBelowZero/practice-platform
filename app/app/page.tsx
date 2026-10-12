@@ -46,7 +46,7 @@ export default async function StaffHome() {
 
       {pf !== null && pf > 0 && (
         <Notice tone="warning" title="Money to reconcile">
-          <p>{countText(pf, "PayFast payment", "PayFast payments")} {pf === 1 ? "was" : "were"} received but could not be matched to an invoice. <Link href="/app/tasks?group=billing">Look at them now</Link>.</p>
+          <p>{countText(pf, "PayFast payment", "PayFast payments")} {pf === 1 ? "was" : "were"} received but could not be matched to an invoice. <Link href="/app/tasks?group=payfast">Look at them now</Link>.</p>
         </Notice>
       )}
 
@@ -55,7 +55,7 @@ export default async function StaffHome() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Tile label="Today's sessions" href="/app/calendar?view=day" unavailable={!sessions} value={tileCount(sessions?.length)}
             note={sessions ? (sessions.length === 0 ? "No sessions today" : statusMixText(sessions)) : undefined} />
-          <AwaitingTile value={awaitingKnown.length ? String(awaitingKnown.reduce((a, n) => a + n, 0)) : tileCount(null)} partial={awaitingKnown.length < awaitingParts.length}
+          <AwaitingTile hint={me.role === "admin" ? "Some forms are only visible to the practitioner." : undefined} value={awaitingKnown.length ? String(awaitingKnown.reduce((a, n) => a + n, 0)) : tileCount(null)} partial={awaitingKnown.length < awaitingParts.length}
             rows={[
               { label: "Booking requests", count: requests, href: "/app/calendar?view=agenda&status=tentative" },
               { label: "Forms submitted this week", count: forms, href: d.forms.ok && d.forms.data.newestPatientId ? `/app/patients/${d.forms.data.newestPatientId}?tab=forms` : "/app/patients" },
@@ -69,7 +69,7 @@ export default async function StaffHome() {
               href={firstNote ? `/app/patients/${firstNote.patient_id}/notes/new?appointment=${firstNote.id}` : "/app/patients"}
               note={notes ? (notes.count === 0 ? "All sessions have a signed note" : "Sessions with no signed note. Opens the oldest.") : undefined} />
           )}
-          <Tile label="Unreconciled PayFast payments" href="/app/tasks?group=billing" unavailable={pf === null} value={tileCount(pf)}
+          <Tile label="Unreconciled PayFast payments" href="/app/tasks?group=payfast" unavailable={pf === null} value={tileCount(pf)}
             note={pf === null ? undefined : pf === 0 ? "None waiting" : "Money received that needs matching"} attention={!!pf && pf > 0} />
           <Tile label="Claims needing attention" href="/app/claims" unavailable={!d.claims.ok} value={d.claims.ok ? String(d.claims.data.rejected + d.claims.data.stale) : "–"}
             note={d.claims.ok ? `${d.claims.data.rejected} rejected, ${d.claims.data.stale} waiting over 30 days` : undefined}

@@ -10,6 +10,7 @@ import { taskLink } from "@/lib/tasks/links";
 import { sastDate, sastDayShort, sastTime } from "@/lib/time";
 import { DueText, PriorityChip } from "@/components/tasks/chips";
 import { LinkButton } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { Card } from "@/components/ui/card";
 import { StatusChip } from "@/components/ui/status-chip";
 import { Unavailable } from "./tiles";
@@ -64,6 +65,7 @@ export function RequestsSection({ s }: { s: Section<{ total: number; items: Dash
                 <div>
                   <span className="font-medium">{a.patientName}</span>
                   <p className="text-sm text-ink-muted">{sastDayShort(sastDate(a.starts_at))}, {sastTime(a.starts_at)} · {a.typeName}</p>
+                  {a.past && <p className="flex items-center gap-1.5 text-sm font-semibold text-warn-ink"><Icon name="alert" />Overdue: the start time has passed and this still needs a decision</p>}
                 </div>
                 <div className="flex gap-2">
                   <LinkButton variant="secondary" href={`/app/calendar/${a.id}`}>Confirm<span className="sr-only"> request from {a.patientName}</span></LinkButton>
@@ -104,8 +106,8 @@ export function EnquiriesSection({ s }: { s: Section<{ total: number; items: Enq
 export function UpcomingSection({ s }: { s: Section<DashAppt[]> }) {
   const groups = s.ok ? groupByDay(s.data, 20) : [];
   return (
-    <Block id="upcoming-h" title="Coming up in the next 7 days" action={<Link href="/app/calendar?view=week">Open the week</Link>}>
-      {!s.ok ? <Unavailable what="upcoming sessions" /> : groups.length === 0 ? <Empty>No sessions are booked for the next 7 days.</Empty> : (
+    <Block id="upcoming-h" title="Coming up: the 7 days after today" action={<Link href="/app/calendar?view=week">Open the week</Link>}>
+      {!s.ok ? <Unavailable what="upcoming sessions" /> : groups.length === 0 ? <Empty>No sessions are booked for the 7 days after today.</Empty> : (
         <div className="grid gap-4">
           {groups.map((g) => (
             <div key={g.date}>

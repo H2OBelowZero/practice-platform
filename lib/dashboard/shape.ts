@@ -37,7 +37,7 @@ export function groupByDay<T extends Dated>(items: T[], max = 20): DayGroup<T>[]
   return out;
 }
 
-/** The window "next 7 days": tomorrow's start up to the start of today + 8 (so 7 whole days after today). */
+/** The window "the 7 days after today": tomorrow's start up to the start of today + 8, i.e. today+1 .. today+7 inclusive (today itself is the schedule above). */
 export const upcomingBoundsUtc = (today: string): { from: string; to: string } => ({ from: sastMidnight(addDays(today, 1)), to: sastMidnight(addDays(today, 8)) });
 
 /** How many appointments are in each status, in a fixed order (confirmed, requested, attended, no-show), with the status label. */

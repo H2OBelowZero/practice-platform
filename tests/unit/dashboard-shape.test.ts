@@ -29,6 +29,14 @@ describe("SAST day and month boundaries", () => {
     expect(upcomingBoundsUtc("2031-03-10")).toEqual({ from: "2031-03-10T22:00:00.000Z", to: "2031-03-17T22:00:00.000Z" });
     expect(upcomingBoundsUtc("2031-02-25").to).toBe("2031-03-04T22:00:00.000Z"); // across the month end
   });
+  it("the upcoming window is today+1 .. today+7 inclusive: the boundary days", () => {
+    const { from, to } = upcomingBoundsUtc("2031-03-10");
+    const inside = (iso: string) => iso >= from && iso < to;
+    expect(inside("2031-03-10T21:59:59.000Z")).toBe(false); // 23:59 SAST today: still today's schedule
+    expect(inside("2031-03-10T22:00:00.000Z")).toBe(true); // 00:00 SAST tomorrow
+    expect(inside("2031-03-17T21:59:59.000Z")).toBe(true); // 23:59 SAST on today + 7
+    expect(inside("2031-03-17T22:00:00.000Z")).toBe(false); // 00:00 SAST on today + 8
+  });
   it("month start and label", () => {
     expect(monthStart("2031-03-10")).toBe("2031-03-01");
     expect(monthStart("2031-12-31")).toBe("2031-12-01");

@@ -61,6 +61,7 @@ describe("/app dashboard", () => {
   it("greets by SAST time with the practice name and today's date", async () => {
     const out = await render();
     expect(out).toContain("Good morning");
+    expect(out).not.toContain("only visible to the practitioner"); // the hint is for the admin
     expect(out).toContain("Dr Example Psychology · Monday, 10 March 2031");
     vi.setSystemTime(new Date("2031-03-10T14:00:00Z")); // 16:00 SAST
     expect(await render()).toContain("Good afternoon");
@@ -70,7 +71,7 @@ describe("/app dashboard", () => {
 
   it("shows the tiles with real numbers, each linking to the page where the work is done", async () => {
     const out = await render();
-    expect(out).toMatch(/Today&#x27;s sessions<\/span><span[^>]*>2<\/span>/);
+    expect(out).toMatch(/Today&#x27;s sessions<span class="sr-only">: <\/span><\/span><span[^>]*>2<\/span>/);
     expect(out).toContain("1 confirmed, 1 requested");
     expect(out).toContain('href="/app/calendar?view=day"');
     // awaiting action = 1 request + 2 forms + 3 tasks due/overdue
@@ -83,10 +84,10 @@ describe("/app dashboard", () => {
     expect(out).toContain("3 open invoices; 2 overdue (R 1 500,00)");
     expect(out).toContain('href="/app/billing"');
     // notes to complete (psychologist): 1 attended without a signed note, links to the oldest
-    expect(out).toMatch(/Notes to complete<\/span><span[^>]*>1<\/span>/);
+    expect(out).toMatch(/Notes to complete<span class="sr-only">: <\/span><\/span><span[^>]*>1<\/span>/);
     expect(out).toContain(`href="/app/patients/${P}/notes/new?appointment=${A2}"`);
     // claims: 2 rejected + 1 stale
-    expect(out).toMatch(/Claims needing attention<\/span><span[^>]*>3<\/span>/);
+    expect(out).toMatch(/Claims needing attention<span class="sr-only">: <\/span><\/span><span[^>]*>3<\/span>/);
     expect(out).toContain("2 rejected, 1 waiting over 30 days");
     expect(out).toContain('href="/app/claims"');
   });
@@ -95,7 +96,7 @@ describe("/app dashboard", () => {
     const out = await render();
     expect(out).toContain("Money to reconcile");
     expect(out).toContain("1 PayFast payment was received but could not be matched");
-    expect(out).toContain('href="/app/tasks?group=billing"');
+    expect(out).toContain('href="/app/tasks?group=payfast"');
     expect(out).toContain("Needs attention");
   });
 
@@ -125,10 +126,22 @@ describe("/app dashboard", () => {
     for (const s of ["New appointment", "New patient", "New invoice", "Open calendar"]) expect(out).toContain(s);
   });
 
+  it("a tentative request whose start time has passed stays in the list and the count, flagged as overdue", async () => {
+    h.resolve = (q) => (q.table === "appointments" && called(q, "eq", "status", "tentative") ? { data: [appt(A2, "2031-03-08T08:00:00Z", "tentative"), appt(T, "2031-03-12T08:00:00Z", "tentative")], count: 2 } : base(q));
+    const out = await render();
+    expect(out).toContain("Overdue: the start time has passed and this still needs a decision");
+    expect(out.match(/Overdue: the start time has passed/g)).toHaveLength(1); // only the one in the past
+    expect(out).toMatch(/Awaiting action<\/p><p[^>]*>7<\/p>/); // 2 requests + 2 forms + 3 tasks
+    const q = h.log.find((x) => x.table === "appointments" && called(x, "eq", "status", "tentative"))!;
+    expect(q.calls.some((c) => c.m === "gte")).toBe(false); // no "not started yet" filter
+    expect(called(q, "order", "starts_at")).toBe(true);
+  });
+
   it("an admin sees the operational tiles but no notes tile, and the notes are never queried", async () => {
     h.role = "admin";
     const out = await render();
     expect(out).not.toContain("Notes to complete");
+    expect(out).toContain("Some forms are only visible to the practitioner.");
     expect(out).toContain("Outstanding invoices");
     expect(out).toContain("Claims needing attention");
     expect(h.log.some((q) => q.calls.some((c) => c.m === "select" && String(c.a[0]).includes("clinical_notes")))).toBe(false);
@@ -152,7 +165,7 @@ describe("/app dashboard", () => {
     expect(out).toContain("No sessions today.");
     expect(out).toContain("No booking requests are waiting.");
     expect(out).toContain("No new enquiries in the last 14 days.");
-    expect(out).toContain("No sessions are booked for the next 7 days.");
+    expect(out).toContain("No sessions are booked for the 7 days after today.");
     expect(out).toContain("Nothing is waiting on you. No open tasks.");
     expect(out).toContain("No payments have been recorded this month yet.");
     expect(out).toContain("Nothing is owed");
@@ -165,6 +178,8 @@ describe("/app dashboard", () => {
     const out = await render();
     expect(out).toContain("We couldn&#x27;t load your tasks just now");
     expect(out).toContain("We couldn&#x27;t load this just now.");
+    expect(out).toContain("not available</span>"); // the tile name says so for a screen reader
+    expect(out).not.toContain("aria-label=\"Outstanding invoices");
     expect(out).not.toContain("boom");
     expect(out).not.toContain("secret");
     expect(out).not.toContain("42P01");
