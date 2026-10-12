@@ -79,3 +79,48 @@ allow-list, and set `APP_URL` to the site's public origin (used for password-res
 Caveat (R14): the DB tests stub the `auth` schema, and there is no Supabase project in CI, so the Supabase Auth flows
 (sign-in, MFA enrolment and verification, email confirmation and recovery links, the signup trigger on the real
 `auth.users`) are only verified after deploying to a real Supabase project (see the e2e specs in Task 18).
+
+## Payments: PayFast
+
+Card payments go through PayFast's hosted checkout. Money is recorded **only** by the server-to-server notification (ITN) at
+`POST /api/payfast/itn`; the browser `return_url` page just shows the stored status. Code: `lib/payments/payfast.ts`
+(signing, checkout form, IP ranges, server-side validate), `lib/payments/itn.ts` (the ordered checks), `app/api/payfast/itn/route.ts`.
+
+Environment variables (`.env.example`):
+
+| Variable | Notes |
+| --- | --- |
+| `PAYFAST_MERCHANT_ID`, `PAYFAST_MERCHANT_KEY` | From the PayFast dashboard (Settings > Integration). Building a checkout throws if either is missing; the ITN returns 500 if the merchant id is missing. |
+| `PAYFAST_PASSPHRASE` | **Must be set identically in the PayFast dashboard** (Settings > Integration > Security passphrase). A mismatch makes every signature fail. Always set one in production. |
+| `PAYFAST_SANDBOX` | Exactly `true` selects `sandbox.payfast.co.za`; anything else (including unset) is the **live** host `www.payfast.co.za`. |
+| `APP_URL` | Public origin; the notify URL is `${APP_URL}/api/payfast/itn`. |
+| `SUPABASE_SERVICE_ROLE_KEY` | The ITN runs as the service role (`record_payment` accepts the `payfast` method only from a `service_role` JWT). |
+
+What the ITN does, in order (R36): body <= 10 KB -> MD5 signature (constant-time, PHP `urlencode` rules, every posted field in
+received order) -> source IP in a PayFast range -> `merchant_id` -> `m_payment_id` is an invoice UUID that exists -> replay
+(`PF-<pf_payment_id>` already recorded for this invoice and amount: answer 200 without calling PayFast) -> `payment_status`
+COMPLETE only -> `amount_gross` equals the invoice's outstanding balance (to the cent, parsed from the string) -> PayFast
+server-side `/eng/query/validate` -> `record_payment`. Rejections are written to the audit log (`payfast.itn.rejected`, reason
+code only, never the body). HTTP 200 means "stop retrying" (recorded, duplicate, ignored status, or invoice already closed),
+400 means refused, 500 means PayFast should retry (PayFast unreachable, database error). The checkout always bills the whole
+outstanding balance; part payments come from manual and medical-aid recording.
+
+Go-live checklist:
+
+- **`notify_url` must be publicly reachable over HTTPS** (not localhost; use a tunnel such as ngrok for local sandbox tests) and
+  must not redirect, sit behind authentication or be blocked by a firewall.
+- **Confirm the source IP ranges** against PayFast's current documentation: `PAYFAST_IP_RANGES` in `lib/payments/payfast.ts`
+  (197.97.145.144/28, 41.74.179.192/27, 102.216.36.0/28, 102.216.36.128/28, 144.126.193.139/32). They are enforced for sandbox
+  ITNs too. The route reads the client address from `x-vercel-forwarded-for` / the first `x-forwarded-for` entry, which Vercel
+  overwrites; on any other host those headers are caller-controlled, so the IP check is then only advisory (signature, merchant id
+  and PayFast's own validate still apply).
+- Confirm the checkout field order and the signature rules in PayFast's documentation (`CHECKOUT_FIELD_ORDER`). The ITN signature
+  covers every posted field including empty ones; the checkout signature skips empty values.
+- Set the PayFast dashboard's ITN to enabled and the passphrase to match; switch `PAYFAST_SANDBOX` off and use live credentials.
+
+Testing in the sandbox: create a sandbox merchant at sandbox.payfast.co.za (or use the public test merchant from PayFast's
+docs), set `PAYFAST_SANDBOX=true` with those credentials, expose the dev server with an HTTPS tunnel and set `APP_URL` to it,
+issue an invoice, pay it from the portal with a sandbox buyer account, and check `payments` (method `payfast`, `gateway_ref`
+`PF-<id>`) and the audit log. Resend the ITN from the sandbox dashboard to see the replay answered with 200 and no second row.
+Automated tests cover the logic with a simulated PayFast (`tests/unit/itn.test.ts`, `tests/db/itn-record.test.ts`); no real
+PayFast call is made in CI.
