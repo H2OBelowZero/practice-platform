@@ -13,7 +13,7 @@ describe("security headers", () => {
     expect(all).toEqual({
       "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
       "X-Content-Type-Options": "nosniff",
-      "Referrer-Policy": "same-origin",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
       "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
       "X-Frame-Options": "DENY",
       "Cross-Origin-Opener-Policy": "same-origin",

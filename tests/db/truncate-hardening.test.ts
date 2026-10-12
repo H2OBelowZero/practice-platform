@@ -12,7 +12,7 @@ async function offenders(c: Client) {
     `select c.relname as tbl, r.rolname as role, p.priv
        from pg_class c join pg_namespace n on n.oid = c.relnamespace
        cross join unnest($1::text[]) as r(rolname) cross join unnest($2::text[]) as p(priv)
-      where n.nspname = 'public' and c.relkind in ('r', 'p') and has_table_privilege(r.rolname, c.oid, p.priv)
+      where n.nspname = 'public' and c.relkind in ('r', 'p', 'v', 'm') and has_table_privilege(r.rolname, c.oid, p.priv)
       order by 1, 2, 3`, [ROLES, privs]);
   return rows.map((x) => `${x.role} has ${x.priv} on ${x.tbl}`);
 }
@@ -50,4 +50,22 @@ it("TRUNCATE as authenticated, service_role and anon fails with permission denie
   await expect(c.query("truncate patients")).rejects.toThrow(/permission denied/);
   await c.query("reset role");
   expect((await c.query("select count(*) from patients")).rows[0].count).toBe(before);
+}));
+
+it("views are covered too: claim_summary and invoice_balances lose the extra privileges but stay readable by the roles that could read them", () => withClient(async (c) => {
+  const kinds = (await c.query("select relname, relkind from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and relname = any('{claim_summary,invoice_balances}')")).rows;
+  expect(kinds.map((r) => r.relkind)).toEqual(["v", "v"]); // the dynamic check below really includes views
+  const can = async (role: string, rel: string) => (await c.query("select has_table_privilege($1, $2, 'SELECT') as ok", [role, rel])).rows[0].ok;
+  expect(await can("authenticated", "claim_summary")).toBe(true);
+  expect(await can("anon", "claim_summary")).toBe(false);
+  expect(await can("authenticated", "invoice_balances")).toBe(true);
+  expect(await can("service_role", "invoice_balances")).toBe(true);
+  expect(await can("anon", "invoice_balances")).toBe(false);
+  expect(await offenders(c)).toEqual([]);
+}));
+
+it("a view created later also starts without TRUNCATE/TRIGGER/REFERENCES (default privileges), SELECT stays", () => withClient(async (c) => {
+  await c.query("create view zz_future_view as select 1 as x");
+  expect(await offenders(c)).toEqual([]);
+  expect((await c.query("select has_table_privilege('authenticated', 'zz_future_view', 'SELECT') as ok")).rows[0].ok).toBe(true);
 }));

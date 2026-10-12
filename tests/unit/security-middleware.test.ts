@@ -1,5 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
+
+beforeEach(() => { vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://abcd.supabase.co"); });
+afterEach(() => vi.unstubAllEnvs());
 
 const h = vi.hoisted(() => ({ user: null as { id: string } | null }));
 vi.mock("@supabase/ssr", () => ({
@@ -21,6 +24,7 @@ describe("middleware CSP", () => {
     const n = forwarded(a, "x-nonce")!;
     expect(n).toMatch(/^[A-Za-z0-9+/]{22}==$/);
     expect(csp).toContain(`'nonce-${n}'`);
+    expect(csp).toContain("connect-src 'self' https://abcd.supabase.co wss://abcd.supabase.co");
     expect(forwarded(a, "content-security-policy")).toBe(csp); // Next reads the REQUEST header to stamp its scripts
     expect(forwarded(b, "x-nonce")).not.toBe(n);
   });
@@ -47,6 +51,58 @@ describe("middleware CSP", () => {
     h.user = { id: "u" };
     expect((await middleware(req("/app"))).status).toBe(200);
     h.user = null;
+  });
+});
+
+describe("session refresh and forwarded cookies", () => {
+  const stale = { cookie: "sb-refreshed=0; other=keep" };
+  it("hands Server Components the REFRESHED cookie (not the stale one) and still sets it on the response", async () => {
+    h.user = { id: "u" };
+    const res = await middleware(req("/portal", stale));
+    h.user = null;
+    const fwd = forwarded(res, "cookie")!;
+    expect(fwd).toContain("sb-refreshed=1");
+    expect(fwd).not.toContain("sb-refreshed=0");
+    expect(fwd).toContain("other=keep");
+    expect(res.headers.get("set-cookie")).toContain("sb-refreshed=1");
+  });
+  it("keeps x-pathname, x-nonce and the CSP request header intact after the refresh", async () => {
+    h.user = { id: "u" };
+    const res = await middleware(req("/app/x?y=1", stale));
+    h.user = null;
+    expect(forwarded(res, "x-pathname")).toBe("/app/x?y=1");
+    const n = forwarded(res, "x-nonce")!;
+    expect(forwarded(res, "content-security-policy")).toContain(`'nonce-${n}'`);
+    expect(res.headers.get("content-security-policy")).toContain(`'nonce-${n}'`);
+  });
+  it("the anonymous redirect keeps the refreshed cookie, no-store and the CSP", async () => {
+    const res = await middleware(req("/app", stale));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("set-cookie")).toContain("sb-refreshed=1");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("content-security-policy")).toContain("script-src");
+  });
+});
+
+describe("CSP configuration fails closed", () => {
+  it("production without NEXT_PUBLIC_SUPABASE_URL answers 500 with fixed text and never reaches the app", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await middleware(req("/login"));
+    expect(res.status).toBe(500);
+    expect(await res.text()).toBe("Service temporarily unavailable.");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("x-middleware-next")).toBeNull(); // not a pass-through
+    expect(String(err.mock.calls[0]?.[1])).toContain("NEXT_PUBLIC_SUPABASE_URL");
+    err.mockRestore();
+  });
+  it("development without the variable uses the local default", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    const res = await middleware(req("/login"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-security-policy")).toContain("connect-src 'self' http://localhost:54321 ws://localhost:54321");
   });
 });
 

@@ -19,7 +19,7 @@
 export interface CspOptions {
   nonce: string;
   isDev: boolean;
-  /** NEXT_PUBLIC_SUPABASE_URL. Used to allow exactly that host (and its realtime websocket) in connect-src. */
+  /** NEXT_PUBLIC_SUPABASE_URL. Allows exactly that origin (and its realtime websocket) in connect-src. Required in production: buildCsp throws without it. */
   supabaseUrl?: string;
 }
 
@@ -29,15 +29,19 @@ export function makeNonce(): string {
   return btoa(String.fromCharCode(...bytes));
 }
 
-/** Exact http(s) and ws(s) origins for the Supabase project, or the *.supabase.co wildcard when the URL is missing or unparseable. */
-export function supabaseConnectSources(supabaseUrl?: string): string[] {
-  try {
-    const u = new URL(supabaseUrl ?? "");
-    if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("protocol");
-    return [u.origin, `${u.protocol === "https:" ? "wss" : "ws"}://${u.host}`];
-  } catch {
-    return ["https://*.supabase.co", "wss://*.supabase.co"];
-  }
+/** What `supabase start` serves; only ever used in development when NEXT_PUBLIC_SUPABASE_URL is not set. */
+export const LOCAL_SUPABASE_URL = "http://localhost:54321";
+
+/**
+ * Exact http(s) and ws(s) origins of the Supabase project. Fails closed: a missing or unusable URL throws in production
+ * (no wildcard fallback: *.supabase.co would let injected script send data to anyone's Supabase project). Development falls back to the local default.
+ */
+export function supabaseConnectSources(supabaseUrl: string | undefined, isDev: boolean): string[] {
+  const raw = supabaseUrl?.trim() || (isDev ? LOCAL_SUPABASE_URL : "");
+  let u: URL;
+  try { u = new URL(raw); } catch { throw new Error("buildCsp: NEXT_PUBLIC_SUPABASE_URL is missing or not a valid URL"); }
+  if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("buildCsp: NEXT_PUBLIC_SUPABASE_URL must be an http(s) URL");
+  return [u.origin, `${u.protocol === "https:" ? "wss" : "ws"}://${u.host}`];
 }
 
 export function buildCsp({ nonce, isDev, supabaseUrl }: CspOptions): string {
@@ -49,7 +53,7 @@ export function buildCsp({ nonce, isDev, supabaseUrl }: CspOptions): string {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
-    `connect-src ${["'self'", ...supabaseConnectSources(supabaseUrl)].join(" ")}`,
+    `connect-src ${["'self'", ...supabaseConnectSources(supabaseUrl, isDev)].join(" ")}`,
     "form-action 'self' https://www.payfast.co.za https://sandbox.payfast.co.za",
     "frame-ancestors 'none'",
     "base-uri 'self'",

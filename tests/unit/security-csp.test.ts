@@ -47,15 +47,18 @@ describe("buildCsp, development", () => {
   });
 });
 
-describe("supabaseConnectSources", () => {
-  it("keeps a custom domain and port", () => expect(supabaseConnectSources("https://db.example.org:8443/")).toEqual(["https://db.example.org:8443", "wss://db.example.org:8443"]));
-  it.each([undefined, "", "not a url", "javascript:alert(1)", "ftp://x.test"])("falls back to *.supabase.co for %j", (u) => {
-    expect(supabaseConnectSources(u)).toEqual(["https://*.supabase.co", "wss://*.supabase.co"]);
+describe("supabaseConnectSources (fails closed)", () => {
+  it("keeps a custom domain and port", () => expect(supabaseConnectSources("https://db.example.org:8443/", false)).toEqual(["https://db.example.org:8443", "wss://db.example.org:8443"]));
+  it.each([undefined, "", "  ", "not a url", "javascript:alert(1)", "ftp://x.test"])("throws in production for %j (no wildcard fallback)", (u) => {
+    expect(() => supabaseConnectSources(u, false)).toThrow(/NEXT_PUBLIC_SUPABASE_URL/);
+    expect(() => buildCsp({ nonce, isDev: false, supabaseUrl: u })).toThrow(/NEXT_PUBLIC_SUPABASE_URL/);
   });
-  it("never puts a wildcard in script-src even when the URL is missing", () => {
-    const csp = buildCsp({ nonce, isDev: false });
-    expect(dir(csp, "script-src")).not.toContain("*");
-    expect(dir(csp, "connect-src")).toContain("https://*.supabase.co");
+  it.each([undefined, "", "  "])("falls back to the local Supabase default in development for %j", (u) => {
+    expect(supabaseConnectSources(u, true)).toEqual(["http://localhost:54321", "ws://localhost:54321"]);
+  });
+  it("still refuses a garbage URL in development", () => expect(() => supabaseConnectSources("nope", true)).toThrow());
+  it("no CSP ever contains a wildcard host", () => {
+    for (const csp of [prod, dev, buildCsp({ nonce, isDev: true })]) expect(csp).not.toMatch(/\*\.supabase\.co|https?:\/\/\*/);
   });
 });
 
@@ -64,9 +67,9 @@ describe("nonce", () => {
     const a = makeNonce(), b = makeNonce();
     expect(a).toMatch(/^[A-Za-z0-9+/]{22}==$/);
     expect(a).not.toBe(b);
-    expect(() => buildCsp({ nonce: a, isDev: false })).not.toThrow();
+    expect(() => buildCsp({ nonce: a, isDev: false, supabaseUrl: "https://abcd.supabase.co" })).not.toThrow();
   });
   it.each(["", "short", "abc; script-src *  xxxxxxxxxxxxxxxxxxxxx", "bad'quote_xxxxxxxxxxxxxxxx", "has space xxxxxxxxxxxxxxxxxx", "line\nbreak_xxxxxxxxxxxxxxxxxx"])("refuses %j as a nonce", (n) => {
-    expect(() => buildCsp({ nonce: n, isDev: false })).toThrow(/invalid nonce/);
+    expect(() => buildCsp({ nonce: n, isDev: false, supabaseUrl: "https://abcd.supabase.co" })).toThrow(/invalid nonce/);
   });
 });

@@ -13,11 +13,11 @@ declare
   t record;
   extra text := case when current_setting('server_version_num')::int >= 170000 then ', maintain' else '' end;
 begin
-  -- every ordinary (r) and partitioned (p) table that exists today; audit_log's own revokes (0001) are a subset of this
+  -- every ordinary (r), partitioned (p), view (v) and materialized view (m) relation that exists today: a view has the same ACL privileges as a table (audit_log's own revokes (0001) are a subset of this)
   for t in
     select c.oid::regclass as tbl
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
-    where n.nspname = 'public' and c.relkind in ('r', 'p')
+    where n.nspname = 'public' and c.relkind in ('r', 'p', 'v', 'm')
   loop
     execute format('revoke truncate, trigger, references%s on %s from anon, authenticated, service_role', extra, t.tbl);
   end loop;

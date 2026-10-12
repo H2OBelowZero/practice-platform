@@ -12,7 +12,8 @@ export const noStoreSources = [
 export const baseHeaders = [
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" }, // no preload: it is hard to undo
   { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "Referrer-Policy", value: "same-origin" },
+  // Not "same-origin": that sends no Referer and a null Origin on the cross-origin PayFast checkout POST. This sends only our origin cross-origin (never a path or query), and nothing on a downgrade.
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   // Telehealth (camera/microphone) is Phase 2: relax then, for the video page only.
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
   { key: "X-Frame-Options", value: "DENY" }, // legacy twin of CSP frame-ancestors 'none'
