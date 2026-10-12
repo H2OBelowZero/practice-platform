@@ -7,6 +7,11 @@ import { EmergencyNotice } from "@/components/ui/emergency-notice";
 import { NavLinks } from "@/components/shell/nav-links";
 import { SignOutButton } from "@/components/shell/sign-out";
 
+// Settings sits beside Sign out in the header (the four main links stay the only items of the main navigation).
+const SettingsLink = () => (
+  <Link href="/portal/settings" className="inline-flex min-h-11 items-center rounded-xl px-3 font-medium text-ink no-underline hover:bg-sunk hover:text-ink">Settings</Link>
+);
+
 // The layout gates the portal, but is NOT the authorisation: every page and server action under /portal calls requireRole itself (R26).
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   await requireRole(["patient", "guardian"]);
@@ -21,9 +26,10 @@ export default async function PortalLayout({ children }: { children: React.React
           <Link href="/portal" className="font-serif text-lg font-semibold text-sage-700 no-underline hover:text-sage-800">{practice?.name ?? "Practice"}</Link>
           <div className="hidden items-center gap-2 lg:flex">
             <NavLinks items={items} variant="top" label="Main" />
+            <SettingsLink />
             <SignOutButton className="w-auto" />
           </div>
-          <div className="lg:hidden"><SignOutButton className="w-auto" /></div>
+          <div className="flex items-center gap-2 lg:hidden"><SettingsLink /><SignOutButton className="w-auto" /></div>
         </div>
       </header>
       <div className="has-bottom-nav flex-1">
