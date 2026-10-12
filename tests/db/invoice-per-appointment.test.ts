@@ -171,7 +171,7 @@ describe("invoice_balances, billing_totals, billing_open_by_due_date", () => {
     const full = await mkInvoice(c, b.p1, { total: 50000 });
     await pay(c, b.psy, full, "eft", 50000);                                            // paid
     const cred = await mkInvoice(c, b.p2, { total: 80000 });
-    await as(c, b.psy, "insert into credit_notes(invoice_id,amount_cents,reason) values ($1,20000,'goodwill')", [cred]);
+    await as(c, b.psy, "insert into credit_notes(invoice_id,amount_cents,reason,portion) values ($1,20000,'goodwill','patient')", [cred]);
     const dr = (await c.query("insert into invoices(patient_id,total_cents,patient_portion_cents) values ($1,70000,70000) returning id", [b.p1])).rows[0].id as string; // draft
     const vd = await mkInvoice(c, b.p1, { total: 40000, status: "void" });
     await c.query("update invoices set due_date='2030-01-10' where id=$1", [o]);

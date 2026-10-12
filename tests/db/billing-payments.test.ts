@@ -241,7 +241,7 @@ it("payments read matrix: staff and bookkeeper see them, a patient/guardian only
 
 // ---- credit notes & status recompute ---------------------------------------------------------------------------------
 const credit = (c: Client, u: string, i: string, amount: number, reason = "r") =>
-  as(c, u, "insert into credit_notes(invoice_id,amount_cents,reason) values ($1,$2,$3) returning id", [i, amount, reason]);
+  as(c, u, "insert into credit_notes(invoice_id,amount_cents,reason,portion) values ($1,$2,$3,'patient') returning id", [i, amount, reason]);
 
 it("credit notes: psychologist only; created_by is forced to the caller; audited", () => withClient(async (c) => {
   const { psy, adm, bk, assoc, u1, g, p1, p2 } = await seed(c);
@@ -249,7 +249,7 @@ it("credit notes: psychologist only; created_by is forced to the caller; audited
   for (const [u, who] of [[adm, "admin"], [bk, "bookkeeper"], [assoc, "associate"], [u1, "patient"], [g, "guardian"]] as const)
     await expect(credit(c, u, i, 100), who).rejects.toThrow(/forbidden/);
   await expect(asService(c, () => c.query("insert into credit_notes(invoice_id,amount_cents,reason) values ($1,100,'r')", [i]))).rejects.toThrow(/permission denied/);
-  const id = (await as(c, psy, "insert into credit_notes(invoice_id,amount_cents,reason,created_by) values ($1,100,'goodwill',$2) returning id", [i, p2])).rows[0].id;
+  const id = (await as(c, psy, "insert into credit_notes(invoice_id,amount_cents,reason,portion,created_by) values ($1,100,'goodwill','patient',$2) returning id", [i, p2])).rows[0].id;
   expect((await c.query("select created_by from credit_notes where id=$1", [id])).rows[0].created_by).toBe(psy);
   const a = (await c.query("select actor_id, role, detail from audit_log where action='credit_note.create' and entity_id=$1", [id])).rows;
   expect(a).toHaveLength(1);

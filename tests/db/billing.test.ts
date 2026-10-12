@@ -214,7 +214,7 @@ it("guardians need permissions.pay to see invoices, lines, payments, credit note
   await c.query("insert into invoice_lines(invoice_id,description,unit_cents) values ($1,'x',100000)", [d]);
   await as(c, psy, "update invoices set status='issued' where id=$1", [d]);
   await pay(c, psy, d, "eft", 1000);
-  await as(c, psy, "insert into credit_notes(invoice_id,amount_cents,reason) values ($1,100,'r')", [d]);
+  await as(c, psy, "insert into credit_notes(invoice_id,amount_cents,reason,portion) values ($1,100,'r','patient')", [d]);
   await c.query("insert into medical_aid_members(patient_id,scheme,member_number) values ($1,'A','1')", [p1]);
   const yes = await guardianWith(c, p1, '{"pay":true}'), no = await guardianWith(c, p1, '{"book":true,"forms":true,"pay":false}');
   const none = await guardianWith(c, p1, '{"book":true}'), old = await guardianWith(c, p1, '{"pay":true}', "2000-01-01");

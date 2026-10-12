@@ -57,7 +57,7 @@ it("outstanding reflects part payments and credit notes, and the ITN pays exactl
   const { psy, p1 } = await seed(c);
   const i = await mkInvoice(c, p1, { total: 100000 });
   await asUser(c, psy, () => c.query("select record_payment($1,'eft',30000,'EFT-1',null)", [i]));
-  await asUser(c, psy, () => c.query("insert into credit_notes(invoice_id,amount_cents,reason) values ($1,10000,'goodwill')", [i]));
+  await asUser(c, psy, () => c.query("insert into credit_notes(invoice_id,amount_cents,reason,portion) values ($1,10000,'goodwill','patient')", [i]));
   expect(await outstanding(c, i)).toBe(60000);
   await itnRecord(c, i, 60000, "PF-60");
   expect(await outstanding(c, i)).toBe(0);

@@ -43,7 +43,7 @@ async function world(c: Client) {
     const line = (await c.query("insert into invoice_lines(invoice_id,description,quantity,unit_cents) values ($1,'Session',1,100000) returning id", [inv])).rows[0].id as string;
     await c.query("update invoices set status='issued' where id=$1", [inv]);
     const payment = (await pay(c, s.psy, inv, "eft", 5000)).rows[0].id as string;
-    const credit = (await as(c, s.psy, "insert into credit_notes(invoice_id,amount_cents,reason) values ($1,1000,'goodwill') returning id", [inv])).rows[0].id as string;
+    const credit = (await as(c, s.psy, "insert into credit_notes(invoice_id,amount_cents,reason,portion) values ($1,1000,'goodwill','patient') returning id", [inv])).rows[0].id as string;
     const claim = (await as(c, s.psy, "insert into claims(invoice_id,member_id,claimed_cents,icd10_codes) values ($1,$2,80000,'{F41.1}') returning id", [inv, member])).rows[0].id as string;
     await as(c, s.psy, "update claims set status='submitted' where id=$1", [claim]);
     await as(c, s.psy, "select record_scheme_remittance($1,1000,$2)", [claim, `REM-${tag}`]); // payment #2 + claim_payments + claim_events
@@ -175,8 +175,8 @@ const ATTACKS: Atk[] = [
   ["insert a payment on own invoice", (w) => ["insert into payments(invoice_id,method,amount_cents,reference) values ($1,'cash',100,null)", [w.a.inv]], NOPRIV("payments")],
   ["update B's payment", (w) => ["update payments set amount_cents=1 where id=$1", [w.b.payment]], NOPRIV("payments")],
   ["delete own payment", (w) => ["delete from payments where id=$1", [w.a.payment]], NOPRIV("payments")],
-  ["credit B's invoice", (w) => ["insert into credit_notes(invoice_id,amount_cents,reason) values ($1,100,'x')", [w.b.inv]], "forbidden"],
-  ["credit own invoice", (w) => ["insert into credit_notes(invoice_id,amount_cents,reason) values ($1,100,'x')", [w.a.inv]], "forbidden"],
+  ["credit B's invoice", (w) => ["insert into credit_notes(invoice_id,amount_cents,reason,portion) values ($1,100,'x','patient')", [w.b.inv]], "forbidden"],
+  ["credit own invoice", (w) => ["insert into credit_notes(invoice_id,amount_cents,reason,portion) values ($1,100,'x','patient')", [w.a.inv]], "forbidden"],
   ["update B's credit note", (w) => ["update credit_notes set amount_cents=1 where id=$1", [w.b.credit]], NOPRIV("credit_notes")],
   ["delete own credit note", (w) => ["delete from credit_notes where id=$1", [w.a.credit]], NOPRIV("credit_notes")],
   // medical aid and claims
