@@ -155,3 +155,48 @@ issue an invoice, pay it from the portal with a sandbox buyer account, and check
 `PF-<id>`) and the audit log. Resend the ITN from the sandbox dashboard to see the replay answered with 200 and no second row.
 Automated tests cover the logic with a simulated PayFast (`tests/unit/itn.test.ts`, `tests/db/itn-record.test.ts`); no real
 PayFast call is made in CI.
+
+## Notifications: outbox, reminders and the cron job
+
+Anything the app wants to tell a person is a row in `notifications_outbox` (written with the service client by the booking, portal-invite, forms
+and billing code). A scheduled worker sends the rows; nothing is sent inside a user's request.
+
+- **Route**: `GET` (or `POST`) `/api/cron/reminders` (`app/api/cron/reminders/route.ts`, worker in `lib/notify/worker.ts`). One run: queue the 24 hour
+  reminders (`enqueue_reminders()`), raise a staff task for each overdue invoice (`enqueue_overdue_tasks()`), then claim due rows in batches of 25
+  (at most 4 batches, 20 second budget), render, send and record each one (`claim_outbox()` / `finish_outbox()`, migration 0022). A row is tried at
+  most 3 times (10 and 20 minute backoff) and then marked `failed`; the failure is a short code in `last_error`, never a provider reply. A crashed run's
+  rows are claimed again after 10 minutes, and two overlapping runs never take the same row (`FOR UPDATE SKIP LOCKED`).
+- **Response and logs**: counts and short codes only (no recipients, no content). One `cron.reminders.run` audit row per run (counts, no personal data).
+  `emailProvider` in the response says whether email really goes out (`resend`) or is only logged (`console`).
+- **Reminders**: confirmed appointments starting 23 to 25 hours from now, for patients whose reminder choice (`patients.comms_prefs`, set on
+  `/portal/settings`) is on and who have the contact detail. One per appointment and channel (`dedupe_key`), so the 15 minute schedule never repeats one.
+  The message holds the date and time (South African time) and a link; the worker adds `APP_URL` in front of the stored path.
+- **Overdue invoices**: one staff task per invoice, ever ("Overdue invoice: follow up", no names), linked to the invoice on the tasks page.
+- **Message privacy** (`lib/notify/templates.ts`, `tests/unit/templates.test.ts`): subjects are fixed text, bodies hold only a date, a time and one link;
+  no names, amounts, invoice numbers, form names or clinical words; every email ends with the emergency footer. A link is sent only if it is a path on this
+  app or already on `APP_URL`'s origin; any other link makes the row fail (`bad_link`) instead of being sent.
+
+Environment variables:
+
+| Variable | Notes |
+| --- | --- |
+| `CRON_SECRET` | **Required.** A long random value (for example `openssl rand -hex 32`). The route answers 500 `misconfigured` when it is not set and 401 for anything but `Authorization: Bearer <CRON_SECRET>` (compared in constant time). When this variable is set on Vercel, Vercel sends that header on every scheduled call by itself. |
+| `EMAIL_API_KEY`, `EMAIL_FROM` | Set both to send real email. Without them email is only logged (outbox id, template and channel; never the address or text), the rows are still marked sent, and `emailProvider` in the response says `console`. A key without a sender fails every send (`provider_misconfigured`) so it is noticed. `EMAIL_FROM` is the verified sender, for example `Bookings <bookings@yourdomain.co.za>`. |
+| `APP_URL` | Origin put in front of emailed links. Required in production. |
+
+**The email provider is a placeholder choice.** `lib/notify/provider.ts` ships a Resend adapter (`https://api.resend.com/emails`, 8 second timeout) only so
+that the worker is complete; **the practice owner must confirm the provider.** Another service needs only another class with the same `send()` method. SMS and
+push use a console provider in Phase 1: SMS reminders are queued when a patient turns them on, but nothing is delivered, and the settings page says "SMS
+reminders are not active yet". **POPIA**: whichever email (or SMS) service is used processes personal information (addresses, appointment times) for the
+practice, so a written operator agreement under section 21 of POPIA must be signed with it, and where its servers are (cross-border transfer, section 72)
+recorded, before live use. Keep message content as neutral as it is now.
+
+**Schedule**: `vercel.json` runs the route every 15 minutes (`*/15 * * * *`). **Vercel's Hobby plan only allows cron jobs that run once a day**
+(and a deployment with a more frequent schedule is refused), so 15 minute reminders need the **Pro** plan. On Hobby, either change the schedule to daily (reminders
+then go out once a day, and an appointment can fall between two runs), or leave the cron entry out and call the endpoint from an external scheduler:
+
+```
+curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://YOUR-APP/api/cron/reminders
+```
+
+Not verified without a live setup: a real provider call, the Vercel schedule itself, and the SQL against a real Supabase project (the DB tests run on plain Postgres).
