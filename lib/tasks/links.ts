@@ -1,6 +1,7 @@
 /**
  * Where a staff task leads. One place for every task source so the tasks page (Task 16), the dashboard and the billing screens agree.
- * Sources: late_cancel_fee, payfast_unreconciled:<pf id>, consent_withdrawn, claim_rejected, duplicate_patient, risk_flag:<note id>, overdue_invoice:<invoice id>.
+ * Sources: late_cancel_fee, payfast_unreconciled:<pf id>, consent_withdrawn, claim_rejected, duplicate_patient, risk_flag:<note id>, overdue_invoice:<invoice id>,
+ * outbox_failed:<outbox id> (no link: there is nothing to open, lib/tasks/groups.ts taskExplanation says what to do) and manual tasks (no link).
  * Returns null for a source we do not know (the task is shown without a link). Only ids from the database are put in the URL,
  * and only when they look like a uuid, so a bad row can never produce a link to somewhere else.
  */
