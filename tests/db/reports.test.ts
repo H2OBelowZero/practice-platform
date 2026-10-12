@@ -16,7 +16,7 @@ async function months(c: Client) {
   return r as { a: string; b: string; e: string; z: string };
 }
 
-const MONTH_SQL = "select month_start::text m, invoices_n::int n, invoiced_cents::int inv, vat_cents::int vat, received_cents::int rec, credit_cents::int cr from report_income_by_month($1,$2)";
+const MONTH_SQL = "select month_start::text m, invoices_n::int n, invoiced_cents::int inv, vat_cents::int vat, vat_credited_cents::int vcr, received_cents::int rec, credit_cents::int cr from report_income_by_month($1,$2)";
 
 async function incomeData(c: Client) {
   const s = await seed(c), m = await months(c);
@@ -41,20 +41,20 @@ async function incomeData(c: Client) {
 it("income by month: invoiced / vat / received / credits per SAST month, drafts and void excluded, empty months present", () => withClient(async (c) => {
   const { psy, a, z, b, e } = await incomeData(c);
   expect(await call(c, psy, MONTH_SQL, [a, z])).toEqual([
-    { m: a, n: 1, inv: 100000, vat: 13043, rec: 40000, cr: 5000 },
-    { m: b, n: 1, inv: 50000, vat: 6522, rec: 60000, cr: 7000 },
-    { m: e, n: 0, inv: 0, vat: 0, rec: 0, cr: 0 },
+    { m: a, n: 1, inv: 100000, vat: 13043, vcr: 652, rec: 40000, cr: 5000 },
+    { m: b, n: 1, inv: 50000, vat: 6522, vcr: 913, rec: 60000, cr: 7000 },
+    { m: e, n: 0, inv: 0, vat: 0, vcr: 0, rec: 0, cr: 0 },
   ]);
 }));
 
 it("income by month: only dates inside the range count (partial first and last month)", () => withClient(async (c) => {
   const { psy, a, b, prev } = await incomeData(c);
-  expect(await call(c, psy, MONTH_SQL, [a, addDays(b, -2)])).toEqual([{ m: a, n: 0, inv: 0, vat: 0, rec: 0, cr: 0 }]);
+  expect(await call(c, psy, MONTH_SQL, [a, addDays(b, -2)])).toEqual([{ m: a, n: 0, inv: 0, vat: 0, vcr: 0, rec: 0, cr: 0 }]);
   expect(await call(c, psy, MONTH_SQL, [prev, b])).toEqual([
-    { m: a, n: 1, inv: 100000, vat: 13043, rec: 40000, cr: 5000 },
-    { m: b, n: 1, inv: 50000, vat: 6522, rec: 60000, cr: 7000 },
+    { m: a, n: 1, inv: 100000, vat: 13043, vcr: 652, rec: 40000, cr: 5000 },
+    { m: b, n: 1, inv: 50000, vat: 6522, vcr: 913, rec: 60000, cr: 7000 },
   ]);
-  expect(await call(c, psy, MONTH_SQL, [b, b])).toEqual([{ m: b, n: 1, inv: 50000, vat: 6522, rec: 60000, cr: 7000 }]);
+  expect(await call(c, psy, MONTH_SQL, [b, b])).toEqual([{ m: b, n: 1, inv: 50000, vat: 6522, vcr: 913, rec: 60000, cr: 7000 }]);
 }));
 
 it("income by month: psychologist, admin and bookkeeper see the same figures", () => withClient(async (c) => {
@@ -165,11 +165,11 @@ it("debtors ageing: five buckets in order, zeros included, scheme + patient add 
 it("debtors ageing: history. As of 20 days ago a later payment, a later credit and a later invoice are not counted", () => withClient(async (c) => {
   const { psy, T } = await debtors(c);
   // i1 was issued today so it did not exist; i2 (due T-10) was not yet due and still owed R200; i3 (due T-45) owed R300, 25 days late;
-  // i4 (due T-75) was 55 days late; i5 was credited in full, which voids it, so it is not reconstructed (documented in the migration)
+  // i4 (due T-75) was 55 days late; i5 (due T-120) owed R50, 100 days late: it was credited off today, which voids it, but it is a booked invoice and owed that on that date
   const rows = await call(c, psy, "select bucket, invoices_n::int n, outstanding_cents::int out from report_debtors_ageing($1)", [addDays(T, -20)]);
   expect(rows).toEqual([
     { bucket: "current", n: 1, out: 20000 }, { bucket: "1-30", n: 1, out: 30000 }, { bucket: "31-60", n: 1, out: 40000 },
-    { bucket: "61-90", n: 0, out: 0 }, { bucket: "90+", n: 0, out: 0 }]);
+    { bucket: "61-90", n: 0, out: 0 }, { bucket: "90+", n: 1, out: 5000 }]);
 }));
 
 it("debtors: bucket boundaries match lib/reports/ageing.ts (due today = current, 30 = 1-30, 31 = 31-60, 60, 61, 90, 91)", () => withClient(async (c) => {
@@ -411,6 +411,97 @@ it("transactions: psychologist, admin and bookkeeper get the same rows; the outp
   expect(await call(c, psy, TX, [addDays(d, -7), addDays(d, -7)])).toHaveLength(20000);
 }));
 
+// ---- credit-voided invoices stay booked (fix round 1, I-1) -----------------------------------------------------------------------------
+// A credit note that settles an unpaid invoice in full makes the database void it. That invoice was still invoiced, and the credit is still a credit: closed months
+// must not change, and the accountant's export must keep the credit row. A void invoice with no credits (a manual void) stays out.
+async function creditVoidData(c: Client) {
+  const s = await seed(c), m = await months(c);
+  await c.query("update practices set vat_registered = true");
+  const mid0 = addDays(m.a, 10), mid1 = addDays(m.b, 10);
+  const mk = async (total: number, vat: number, status = "issued") => {
+    const i = await mkInvoice(c, s.p1, { total, status });
+    await c.query("update invoices set issue_date=$2, vat_cents=$3 where id=$1", [i, mid0, vat]);
+    return i;
+  };
+  const credit = (i: string, cents: number, at: string) =>
+    c.query("insert into credit_notes(invoice_id,amount_cents,reason,portion,created_at) values ($1,$2,'r','patient',$3::timestamptz)", [i, cents, `${at}T10:00:00Z`]);
+  return { ...s, ...m, mid0, mid1, mk, credit };
+}
+const MONTH2 = "select month_start::text m, invoices_n::int n, invoiced_cents::int inv, vat_cents::int vat, vat_credited_cents::int vcr, received_cents::int rec, credit_cents::int cr from report_income_by_month($1,$2)";
+
+it("a full credit in a later month: the issue month keeps its invoiced total and VAT, the credit month shows the credit and its VAT, and re-running the closed month gives the same figures", () => withClient(async (c) => {
+  const { psy, a, b, z, mk, credit, mid1 } = await creditVoidData(c);
+  const X = await mk(11500, 1500);
+  const before = await call(c, psy, MONTH2, [a, z]);
+  expect(before[0]).toEqual({ m: a, n: 1, inv: 11500, vat: 1500, vcr: 0, rec: 0, cr: 0 });
+  await credit(X, 11500, mid1); // unpaid, so the database voids the invoice
+  expect((await one(c, "select status from invoices where id=$1", [X])).status).toBe("void");
+  const after = await call(c, psy, MONTH2, [a, z]);
+  expect(after[0]).toEqual(before[0]); // M0 unchanged
+  expect(after[1]).toEqual({ m: b, n: 0, inv: 0, vat: 0, vcr: 1500, rec: 0, cr: 11500 });
+}));
+
+it("transactions: the full credit of a credit-voided invoice is a negative row with negative VAT", () => withClient(async (c) => {
+  const { psy, mk, credit, mid1 } = await creditVoidData(c);
+  const X = await mk(11500, 1500);
+  await credit(X, 11500, mid1);
+  const n = (await one(c, "select number from invoices where id=$1", [X])).number as string;
+  expect(await call(c, psy, TX, [mid1, mid1])).toEqual([{ d: mid1, kind: "credit_note", inv: n, method: "credit_note", ref: null, portion: "patient", amt: -11500, vat: -1500 }]);
+}));
+
+it("a partial credit and then the remainder: VAT on the two credits adds up to the invoice VAT exactly; a manually voided invoice stays out", () => withClient(async (c) => {
+  const { psy, a, z, b, mk, credit, mid0, mid1 } = await creditVoidData(c);
+  const X = await mk(11500, 1500), Y = await mk(20000, 2609), Z = await mk(8000, 1043, "void"); // Z: voided by hand, no credits
+  await credit(Y, 5000, mid0);
+  await credit(Y, 15000, mid1); // 5000 + 15000 = the whole invoice: voided by credits
+  expect((await one(c, "select status from invoices where id=$1", [Y])).status).toBe("void");
+  void X; void Z;
+  const rows = await call(c, psy, MONTH2, [a, z]);
+  // M0: X + Y invoiced (Z is not); credit 5000 -> round(5000 * 2609 / 20000) = 652
+  expect(rows[0]).toEqual({ m: a, n: 2, inv: 31500, vat: 4109, vcr: 652, rec: 0, cr: 5000 });
+  // M1: the remainder 15000 carries 2609 - 652 = 1957
+  expect(rows[1]).toEqual({ m: b, n: 0, inv: 0, vat: 0, vcr: 1957, rec: 0, cr: 15000 });
+  expect(rows[0].vcr + rows[1].vcr).toBe(2609);
+  const tx = await call(c, psy, TX, [mid0, mid1]);
+  expect(tx.map((r) => [r.d, r.amt, r.vat])).toEqual([[mid0, -5000, -652], [mid1, -15000, -1957]]);
+  const st = await call(c, psy, "select session_type, invoices_n::int n, invoiced_cents::int inv from report_income_by_session_type($1,$2)", [a, z]);
+  expect(st).toEqual([{ session_type: "Other / manual", n: 2, inv: 31500 }]); // X and Y, not Z
+}));
+
+it("debtors as at a date before the credit still list the invoice; after the credit (and for a manual void) they do not", () => withClient(async (c) => {
+  const { psy, p1 } = await seed(c);
+  const T = await today(c);
+  const mk = async (total: number, status = "issued") => {
+    const i = await mkInvoice(c, p1, { total, status });
+    await c.query("update invoices set issue_date=$2, due_date=$3 where id=$1", [i, addDays(T, -60), addDays(T, -40)]);
+    return i;
+  };
+  const credit = (i: string, cents: number, at: string) =>
+    c.query("insert into credit_notes(invoice_id,amount_cents,reason,portion,created_at) values ($1,$2,'r','patient',$3::timestamptz)", [i, cents, `${at}T10:00:00Z`]);
+  const X = await mk(11500), Y = await mk(20000), Z = await mk(7000, "void");
+  await credit(X, 11500, addDays(T, -10));          // voided by credits 10 days ago
+  await credit(Y, 5000, addDays(T, -30)); await credit(Y, 15000, addDays(T, -10));
+  const owed = async (asOf: string) => (await call(c, psy, "select outstanding_cents::int out, days_overdue::int late, bucket from report_debtors_detail($1) order by outstanding_cents", [asOf]));
+  expect(await owed(addDays(T, -35))).toEqual([{ out: 11500, late: 5, bucket: "1-30" }, { out: 20000, late: 5, bucket: "1-30" }]); // before any credit
+  expect(await owed(addDays(T, -20))).toEqual([{ out: 11500, late: 20, bucket: "1-30" }, { out: 15000, late: 20, bucket: "1-30" }]); // Y partly credited
+  expect(await owed(T)).toEqual([]); // both credited off; Z was never booked
+  expect(await owed(addDays(T, -70))).toEqual([]); // before they were issued
+  void Z;
+}));
+
+it("VAT on payments is worked out from the running total paid, so the VAT of an invoice's payments adds up to the invoice VAT exactly", () => withClient(async (c) => {
+  const { psy, p1 } = await seed(c), T = await today(c);
+  await c.query("update practices set vat_registered = true");
+  const i = await mkInvoice(c, p1, { total: 10000 });
+  await c.query("update invoices set vat_cents=1304 where id=$1", [i]);
+  await pay(c, psy, i, "eft", 3333, "V1", addDays(T, -3));
+  await pay(c, psy, i, "eft", 3333, "V2", addDays(T, -2));
+  await pay(c, psy, i, "eft", 3334, "V3", addDays(T, -1));
+  const rows = await call(c, psy, TX, [addDays(T, -3), T]);
+  expect(rows.map((r) => [r.amt, r.vat])).toEqual([[3333, 435], [3333, 434], [3334, 435]]); // 435.0 -> running 869 -> 1304
+  expect(rows.reduce((t, r) => t + r.vat, 0)).toBe(1304);
+}));
+
 // ---- shared: roles, ranges, grants, shape ---------------------------------------------------------------------------------------------
 const RANGE_FNS: { fn: string; roles: "money" | "staff" | "psychologist" }[] = [
   { fn: "report_income_by_month", roles: "money" }, { fn: "report_income_by_method", roles: "money" }, { fn: "report_income_by_session_type", roles: "money" },
@@ -485,8 +576,19 @@ it("no result carries patient identity: no column named for a patient except pat
   }
 }));
 
-it("the reports read through the caller's RLS: a bookkeeper's session-type figures do not leak appointments, and other roles' tables stay unreadable", () => withClient(async (c) => {
-  const { bk } = await seed(c);
-  // the definer function exposes only its three output columns; the bookkeeper still cannot read appointments directly
+it("the definer session-type report gives the bookkeeper aggregates only: three columns, no ids or times, while appointments stay unreadable to them and the session-type names are not patient data", () => withClient(async (c) => {
+  const { bk, p1 } = await seed(c);
+  const t = (await one(c, "insert into session_types(name,duration_min,fee_cents) values ('Therapy',50,95000) returning id")).id as string;
+  const ap = (await one(c, "insert into appointments(patient_id,session_type_id,starts_at,ends_at,status) values ($1,$2,'2030-03-04T06:00:00Z','2030-03-04T06:50:00Z','attended') returning id", [p1, t])).id as string;
+  const i = await mkInvoice(c, p1, { total: 95000 });
+  await c.query("update invoices set appointment_id=$2 where id=$1", [i, ap]);
+  const d = await today(c);
+  const res = await asUser(c, bk, () => c.query("select * from report_income_by_session_type($1,$2)", [d, d]));
+  expect(res.fields.map((f) => f.name)).toEqual(["session_type", "invoices_n", "invoiced_cents"]);
+  expect(JSON.stringify(res.rows)).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/); // no uuid anywhere in the output
+  expect(res.rows).toEqual([{ session_type: "Therapy", invoices_n: "1", invoiced_cents: "95000" }]);
+  // the same bookkeeper cannot read the underlying rows, and an invoker report function used by a role with no staff role fails closed
   expect((await as(c, bk, "select 1 from appointments")).rowCount).toBe(0);
+  expect((await as(c, bk, "select 1 from patients")).rowCount).toBe(0);
+  await expect(asService(c, () => c.query("select * from report_income_by_month($1,$2)", [d, d]))).rejects.toThrow(/forbidden/);
 }));

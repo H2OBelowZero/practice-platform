@@ -11,11 +11,18 @@
 -- Money is integer cents. Rates are returned as fractions (0.1234 = 12.3 %) rounded to 4 decimals, NULL when the denominator is zero.
 
 -- ---- 1. income by month ---------------------------------------------------------------------------------------------------------------
--- invoiced = total of invoices ISSUED in the month (issue_date) with status issued / part_paid / paid (never draft, never void); vat = their VAT;
--- received = succeeded payments by received_on; credit = credit notes by the SAST date they were created, on those same non-draft, non-void invoices.
+-- BOOKED invoices (used by the income, session type, debtors and transactions reports): status issued / part_paid / paid, OR void BECAUSE OF CREDITS: the database
+-- voids an unpaid invoice once its credit notes reach its total (invoice_recompute), and such an invoice was still invoiced, so it must stay in the month it was
+-- issued (a closed month never changes when a credit note is added later). A void invoice whose credits are less than its total was voided by hand and is not booked.
+-- Drafts are never booked. In SQL: status in (...) or (status = 'void' and total > 0 and sum(credit notes) >= total).
+--
+-- invoiced = total of BOOKED invoices ISSUED in the month (issue_date); vat = their VAT; received = succeeded payments by received_on;
+-- credit = credit notes by the SAST date they were created, on every non-draft invoice; vat_credited = the VAT those credit notes carry: each credit note's VAT is
+-- the difference of round(running credited total * invoice VAT / invoice total) before and after it (credit notes of an invoice in order of creation), so the VAT of
+-- all the credit notes of an invoice adds up to round(credited * VAT / total) and to the invoice VAT exactly once it is credited in full.
 -- Every calendar month touched by the range gets a row (zeros included); only dates inside [p_from, p_to] count, so the first and last month can be partial.
 create function report_income_by_month(p_from date, p_to date)
-returns table (month_start date, invoices_n bigint, invoiced_cents bigint, vat_cents bigint, received_cents bigint, credit_cents bigint)
+returns table (month_start date, invoices_n bigint, invoiced_cents bigint, vat_cents bigint, vat_credited_cents bigint, received_cents bigint, credit_cents bigint)
 language plpgsql stable security invoker set search_path = public, pg_temp as $$
 #variable_conflict use_column
 begin
@@ -26,15 +33,25 @@ begin
     select g::date as mo from generate_series(date_trunc('month', p_from::timestamp), date_trunc('month', p_to::timestamp), interval '1 month') g),
   inv as (
     select date_trunc('month', i.issue_date::timestamp)::date as mo, count(*) as n, sum(i.total_cents) as total, sum(i.vat_cents) as vat
-      from invoices i where i.status in ('issued', 'part_paid', 'paid') and i.issue_date between p_from and p_to group by 1),
+      from invoices i
+     where (i.status in ('issued', 'part_paid', 'paid')
+            or (i.status = 'void' and i.total_cents > 0 and coalesce((select sum(k.amount_cents) from credit_notes k where k.invoice_id = i.id), 0) >= i.total_cents))
+       and i.issue_date between p_from and p_to group by 1),
   pay as (
     select date_trunc('month', p.received_on::timestamp)::date as mo, sum(p.amount_cents) as amount
       from payments p where p.status = 'succeeded' and p.received_on between p_from and p_to group by 1),
-  cr as (
-    select date_trunc('month', c.created_at at time zone 'Africa/Johannesburg')::date as mo, sum(c.amount_cents) as amount
+  crv as (
+    select c.created_at, c.amount_cents,
+           case when i.total_cents > 0 then
+             round(sum(c.amount_cents) over w * i.vat_cents::numeric / i.total_cents) - round((sum(c.amount_cents) over w - c.amount_cents) * i.vat_cents::numeric / i.total_cents)
+           else 0 end as vat
       from credit_notes c join invoices i on i.id = c.invoice_id
-     where i.status in ('issued', 'part_paid', 'paid') and (c.created_at at time zone 'Africa/Johannesburg')::date between p_from and p_to group by 1)
-  select m.mo, coalesce(inv.n, 0)::bigint, coalesce(inv.total, 0)::bigint, coalesce(inv.vat, 0)::bigint, coalesce(pay.amount, 0)::bigint, coalesce(cr.amount, 0)::bigint
+     where i.status <> 'draft'
+    window w as (partition by c.invoice_id order by c.created_at, c.id rows between unbounded preceding and current row)),
+  cr as (
+    select date_trunc('month', v.created_at at time zone 'Africa/Johannesburg')::date as mo, sum(v.amount_cents) as amount, sum(v.vat) as vat
+      from crv v where (v.created_at at time zone 'Africa/Johannesburg')::date between p_from and p_to group by 1)
+  select m.mo, coalesce(inv.n, 0)::bigint, coalesce(inv.total, 0)::bigint, coalesce(inv.vat, 0)::bigint, coalesce(cr.vat, 0)::bigint, coalesce(pay.amount, 0)::bigint, coalesce(cr.amount, 0)::bigint
     from months m left join inv on inv.mo = m.mo left join pay on pay.mo = m.mo left join cr on cr.mo = m.mo
    order by m.mo;
 end $$;
@@ -72,18 +89,21 @@ begin
     from invoices i
     left join appointments a on a.id = i.appointment_id
     left join session_types st on st.id = a.session_type_id
-   where i.status in ('issued', 'part_paid', 'paid') and i.issue_date between p_from and p_to
+   where (i.status in ('issued', 'part_paid', 'paid')
+            or (i.status = 'void' and i.total_cents > 0 and coalesce((select sum(k.amount_cents) from credit_notes k where k.invoice_id = i.id), 0) >= i.total_cents))
+     and i.issue_date between p_from and p_to
    group by coalesce(st.name, 'Other / manual')
    order by (coalesce(st.name, 'Other / manual') = 'Other / manual'), 3 desc, 1;
 end $$;
 
 -- ---- 4. debtors ----------------------------------------------------------------------------------------------------------------------
--- What each open invoice owed ON p_as_of (a SAST date from 800 days ago to today): issued on or before that date (issue_date), status issued / part_paid / paid
--- now (a void invoice carries no payments and is never open), minus the succeeded payments received by then and the credit notes created by then.
+-- What each open invoice owed ON p_as_of (a SAST date from 800 days ago to today): BOOKED invoices (see the top of this file: an invoice voided by credits counts, a
+-- manually voided one does not) issued on or before that date (issue_date), minus the succeeded payments received by then and the credit notes created by then. So a
+-- debt that was credited off later still shows as owing on a date before the credit, and shows nothing from the credit date on.
 -- For today this equals invoice_balances.outstanding_cents. Bucket by whole days past due_date: due today or later = current, 1-30, 31-60, 61-90, 90+ (the same
 -- rule as lib/reports/ageing.ts). scheme / patient outstanding follow R40: the scheme owes scheme portion - remittances (medical_aid payments) - scheme credits,
 -- the patient owes patient portion - their own payments (every other method) - patient credits, never below zero.
--- patient_id is null for a bookkeeper (invoice number, due date and amounts are enough for them). An invoice that is void now (voided by hand, or fully credited, which voids it) is never listed, even for an earlier p_as_of.
+-- patient_id is null for a bookkeeper (invoice number, due date and amounts are enough for them). An invoice voided by hand is never listed, even for an earlier p_as_of.
 create function report_debtors_detail(p_as_of date)
 returns table (invoice_number text, due_date date, days_overdue int, bucket text, payer_type text, outstanding_cents int, scheme_cents int, patient_cents int, patient_id uuid)
 language plpgsql stable security invoker set search_path = public, pg_temp as $$
@@ -110,7 +130,9 @@ begin
            greatest(0, i.patient_portion_cents - coalesce(pay.own_paid, 0) - coalesce(cr.patient_credit, 0)) as patient_out,
            (p_as_of - i.due_date) as late
       from invoices i left join pay on pay.invoice_id = i.id left join cr on cr.invoice_id = i.id
-     where i.status in ('issued', 'part_paid', 'paid') and i.issue_date <= p_as_of)
+     where (i.status in ('issued', 'part_paid', 'paid')
+            or (i.status = 'void' and i.total_cents > 0 and coalesce((select sum(k.amount_cents) from credit_notes k where k.invoice_id = i.id), 0) >= i.total_cents))
+       and i.issue_date <= p_as_of)
   select x.number, x.due_date, greatest(x.late, 0),
          case when x.late <= 0 then 'current' when x.late <= 30 then '1-30' when x.late <= 60 then '31-60' when x.late <= 90 then '61-90' else '90+' end,
          x.payer_type, x.outstanding::int, x.scheme_out::int, x.patient_out::int,
@@ -272,10 +294,13 @@ begin
 end $$;
 
 -- ---- 8. transactions (the accountant export) ------------------------------------------------------------------------------------------
--- One row per succeeded payment (by received_on) and one NEGATIVE row per credit note (by its SAST creation date, on non-draft, non-void invoices).
+-- One row per succeeded payment (by received_on) and one NEGATIVE row per credit note (by its SAST creation date, on every non-draft invoice, also one that the credit itself voided).
 --   reference: medical_aid = the remittance advice number (claim_payments.remittance_ref, never the composite gateway_ref); payfast = the PayFast payment reference;
 --              eft / card_machine / cash = the reference staff typed (a bank reference can contain a payer's name, which is why the app warns about it); credit note = null.
---   vat_cents: only when the practice is VAT registered (else null): round(amount * invoice vat / invoice total), negative for a credit note.
+--   vat_cents: only when the practice is VAT registered (else null). The VAT of a payment is the difference of round(running total paid on that invoice * invoice VAT /
+--              invoice total) before and after it (payments of an invoice in order of date received, then creation), so the VAT of all the payments of an invoice
+--              adds up to the invoice VAT to the cent once it is paid in full (the odd cents fall out of the running total, not out of each row). Credit notes are
+--              treated the same way among themselves and carry negative VAT. A credit-voided invoice keeps its credit rows (see BOOKED at the top).
 --   portion: 'scheme' for a medical_aid payment or a scheme credit, 'patient' otherwise.
 -- No patient name or id. At most 20000 rows: more raises 'too_many_rows' (narrow the dates).
 create function report_transactions(p_from date, p_to date)
@@ -288,30 +313,44 @@ begin
   if p_from is null or p_to is null or p_to < p_from or p_to - p_from > 800 then raise exception 'invalid_range'; end if;
   select (select count(*) from payments p where p.status = 'succeeded' and p.received_on between p_from and p_to)
        + (select count(*) from credit_notes c join invoices i on i.id = c.invoice_id
-           where i.status in ('issued', 'part_paid', 'paid') and (c.created_at at time zone 'Africa/Johannesburg')::date between p_from and p_to)
+           where i.status <> 'draft' and (c.created_at at time zone 'Africa/Johannesburg')::date between p_from and p_to)
     into v_n;
   if v_n > 20000 then raise exception 'too_many_rows'; end if;
   select coalesce((select vat_registered from practices limit 1), false) into v_vat;
   return query
-  select t.txn_date, t.kind, t.invoice_number, t.method, t.reference, t.portion, t.amount_cents, t.vat_cents from (
-    select p.received_on as txn_date, 'payment'::text as kind, i.number as invoice_number, p.method as method,
-           case p.method when 'medical_aid' then (select cp.remittance_ref from claim_payments cp where cp.payment_id = p.id)
-                         when 'payfast' then p.gateway_ref else p.reference end as reference,
-           case when p.method = 'medical_aid' then 'scheme' else 'patient' end as portion,
-           p.amount_cents::bigint as amount_cents,
-           case when v_vat and i.total_cents > 0 then round(p.amount_cents::numeric * i.vat_cents / i.total_cents)::bigint end as vat_cents,
-           p.created_at as ord_at
+  with pv as (
+    select p.id, p.received_on, p.created_at, p.method, p.status, p.gateway_ref, p.reference, p.amount_cents, i.number,
+           case when i.total_cents > 0 then
+             round(sum(p.amount_cents) over w * i.vat_cents::numeric / i.total_cents) - round((sum(p.amount_cents) over w - p.amount_cents) * i.vat_cents::numeric / i.total_cents)
+           else 0 end as vat
       from payments p join invoices i on i.id = p.invoice_id
-     where p.status = 'succeeded' and p.received_on between p_from and p_to
-    union all
-    select (c.created_at at time zone 'Africa/Johannesburg')::date, 'credit_note', i.number, 'credit_note', null, c.portion,
-           -c.amount_cents::bigint,
-           case when v_vat and i.total_cents > 0 then -round(c.amount_cents::numeric * i.vat_cents / i.total_cents)::bigint end,
-           c.created_at
+     where p.status = 'succeeded'
+    window w as (partition by p.invoice_id order by p.received_on, p.created_at, p.id rows between unbounded preceding and current row)),
+  cv as (
+    select c.id, c.created_at, c.amount_cents, c.portion, i.number,
+           case when i.total_cents > 0 then
+             round(sum(c.amount_cents) over w * i.vat_cents::numeric / i.total_cents) - round((sum(c.amount_cents) over w - c.amount_cents) * i.vat_cents::numeric / i.total_cents)
+           else 0 end as vat
       from credit_notes c join invoices i on i.id = c.invoice_id
-     where i.status in ('issued', 'part_paid', 'paid') and (c.created_at at time zone 'Africa/Johannesburg')::date between p_from and p_to
+     where i.status <> 'draft'
+    window w as (partition by c.invoice_id order by c.created_at, c.id rows between unbounded preceding and current row))
+  select t.txn_date, t.kind, t.invoice_number, t.method, t.reference, t.portion, t.amount_cents, t.vat_cents from (
+    select pv.received_on as txn_date, 'payment'::text as kind, pv.number as invoice_number, pv.method as method,
+           case pv.method when 'medical_aid' then (select cp.remittance_ref from claim_payments cp where cp.payment_id = pv.id)
+                          when 'payfast' then pv.gateway_ref else pv.reference end as reference,
+           case when pv.method = 'medical_aid' then 'scheme' else 'patient' end as portion,
+           pv.amount_cents::bigint as amount_cents,
+           case when v_vat then pv.vat::bigint end as vat_cents,
+           pv.created_at as ord_at
+      from pv where pv.received_on between p_from and p_to
+    union all
+    select (cv.created_at at time zone 'Africa/Johannesburg')::date, 'credit_note', cv.number, 'credit_note', null, cv.portion,
+           -cv.amount_cents::bigint,
+           case when v_vat then -cv.vat::bigint end,
+           cv.created_at
+      from cv where (cv.created_at at time zone 'Africa/Johannesburg')::date between p_from and p_to
   ) as t
-  order by t.txn_date, t.kind, t.invoice_number, t.ord_at;
+  order by t.txn_date, t.kind, t.invoice_number, t.ord_at, t.method, t.amount_cents;
 end $$;
 
 -- ---- grants (R4) -----------------------------------------------------------------------------------------------------------------------
