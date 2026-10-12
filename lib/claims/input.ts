@@ -75,6 +75,9 @@ export const parseClaimRef = (values: Values): Result<{ claimRef: string | undef
 export const parseApproved = (values: Values): Result<{ approvedCents: number }> =>
   run(z.object({ approved: amount("the approved amount") }).transform((v) => ({ approvedCents: v.approved })), values);
 
+/** The ICD-10 search text: 1 to 40 characters. */
+export const icd10Query = z.string({ error: "Type a code or a word to search for." }).trim().min(1, "Type a code or a word to search for.").max(40, "Keep the search under 40 characters.");
+
 export const REASON_MAX = 300;
 export const parseRejection = (values: Values): Result<{ reason: string }> =>
   run(z.object({ reason: z.string({ error: "Give the reason the claim was rejected." }).trim().min(1, "Give the reason the claim was rejected.").max(REASON_MAX, `Keep the reason under ${REASON_MAX} characters.`) }), values);
@@ -83,5 +86,6 @@ export const REMITTANCE_REF_MAX = 100;
 export const parseRemittance = (values: Values): Result<{ amountCents: number; ref: string }> =>
   run(z.object({
     amount: amount("the amount the scheme paid"),
-    ref: z.string({ error: "Enter the remittance advice number." }).trim().min(1, "Enter the remittance advice number.").max(REMITTANCE_REF_MAX, `Keep the reference under ${REMITTANCE_REF_MAX} characters.`),
+    ref: z.string({ error: "Enter the remittance advice number." }).trim().min(1, "Enter the remittance advice number.").max(REMITTANCE_REF_MAX, `Keep the reference under ${REMITTANCE_REF_MAX} characters.`)
+      .refine((s) => !s.includes("#"), "The remittance reference cannot contain the # character."),
   }).transform((v) => ({ amountCents: v.amount, ref: v.ref })), values);

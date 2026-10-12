@@ -13,18 +13,29 @@ export const CLAIM_NOTICE_TEXT = {
   submitted: "The claim is marked as submitted. Record the scheme's answer here when it arrives.",
   resubmitted: "The claim is marked as submitted again.",
   accepted: "The claim is marked as accepted.",
+  accepted_paid: "The claim is marked as accepted. The scheme has already paid at least the approved amount, so it is now paid.",
   rejected: "The claim is marked as rejected. A follow-up task has been added for the practice.",
   reopened: "The claim is back in draft. Correct it, then mark it as submitted again.",
   remitted: "The scheme payment has been recorded.",
+  remitted_again: "That payment was already recorded.",
 } as const;
 export type ClaimNoticeCode = keyof typeof CLAIM_NOTICE_TEXT;
 export const claimNotice = (code: string | undefined): string | undefined => (code !== undefined && Object.hasOwn(CLAIM_NOTICE_TEXT, code) ? CLAIM_NOTICE_TEXT[code as ClaimNoticeCode] : undefined);
 
-export const MANUAL_SUBMISSION_NOTE = "Submission is tracked manually in this version: submit through your scheme or clearing house and record the outcome here.";
+export const MANUAL_SUBMISSION_NOTE = "Submission is tracked manually in this version; submit through your scheme or clearing house and record the outcome here.";
 
 export type ClaimEvent = { event: string; from_status: string | null; to_status: string | null; detail?: unknown };
 
-/** One line for a claim_events row, or null for a row the timeline leaves out (the part_paid / paid status change is shown by the remittance row that caused it). */
+/**
+ * The rows the timeline shows. A scheme payment writes two rows in one transaction (the remittance and the part paid / paid status change, same `at`);
+ * only the remittance row is shown. A status change to part paid / paid with no remittance beside it (accepting a part paid claim whose payments already cover
+ * the approved amount) is kept.
+ */
+export function timelineEvents<T extends { event: string; to_status: string | null; at: string }>(events: T[]): T[] {
+  return events.filter((e) => !(e.event.startsWith("status:") && (e.to_status === "part_paid" || e.to_status === "paid") && events.some((r) => r.event === "remittance" && r.at === e.at && r.to_status === e.to_status)));
+}
+
+/** One line for a claim_events row, or null for a row the timeline has no wording for. */
 export function claimEventText(e: ClaimEvent): string | null {
   if (e.event === "remittance") return `Scheme payment recorded${e.to_status === "paid" ? ": claim fully paid" : e.to_status === "part_paid" ? ": claim part paid" : ""}`;
   if (!e.event.startsWith("status:")) return null;
@@ -33,7 +44,8 @@ export function claimEventText(e: ClaimEvent): string | null {
     case "submitted": return e.from_status === "draft" || e.from_status === null ? "Marked as submitted" : "Marked as submitted again";
     case "accepted": return "Marked as accepted";
     case "rejected": return "Marked as rejected";
-    case "part_paid": case "paid": return null;
+    case "part_paid": return "Claim part paid";
+    case "paid": return "Claim paid in full";
     default: return `Status changed to ${(e.to_status ?? "unknown").replace(/_/g, " ")}`;
   }
 }

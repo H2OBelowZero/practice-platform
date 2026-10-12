@@ -9,6 +9,12 @@ export const PAYER_FILTERS = [{ value: "", label: "Any payer" }, ...PAYER_TYPES.
 export const METHOD_LABEL: Record<string, string> = {
   eft: "EFT", cash: "Cash", card_machine: "Card machine", payfast: "PayFast (online)", medical_aid: "Medical aid remittance",
 };
+/**
+ * The reference to show for a payment. A scheme remittance is stored with the claim appended ("<advice number>#<claim id>", 0020), so for a medical aid payment only the
+ * part before the # is ever shown. Every page that prints a payment reference goes through here.
+ */
+export const paymentRef = (p: { method: string; reference: string | null; gateway_ref: string | null }): string | null =>
+  p.reference ?? (p.gateway_ref === null ? null : p.method === "medical_aid" ? p.gateway_ref.split("#")[0] : p.gateway_ref);
 export const ROLE_LABEL: Record<string, string> = {
   psychologist: "Psychologist", admin: "Admin", bookkeeper: "Bookkeeper", associate: "Associate", patient: "Patient", guardian: "Guardian",
 };

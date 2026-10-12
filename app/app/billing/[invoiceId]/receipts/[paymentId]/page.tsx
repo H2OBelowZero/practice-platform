@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireRole } from "@/lib/auth/session";
 import { uuid } from "@/lib/billing/input";
-import { METHOD_LABEL } from "@/lib/billing/list";
+import { METHOD_LABEL, paymentRef } from "@/lib/billing/list";
 import { getBillingPractice } from "@/lib/billing/practice";
 import { formatZar } from "@/lib/money";
 import { supabaseServer } from "@/lib/supabase/server";
@@ -31,7 +31,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ invoic
   if (!inv || !pay || pay.status !== "succeeded") notFound();
   const practice = await getBillingPractice();
   const { data: pat } = me.role === "bookkeeper" ? { data: null } : await sb.from("patients").select("first_name, last_name").eq("id", inv.patient_id).maybeSingle();
-  const ref = (pay.reference ?? pay.gateway_ref) as string | null;
+  const ref = paymentRef(pay as { method: string; reference: string | null; gateway_ref: string | null });
 
   return (
     <>

@@ -64,13 +64,15 @@ describe("access", () => {
     const src = read(actionsFile);
     expect(src).toMatch(/const STAFF = \["psychologist", "admin"\] as const/);
     const exported = [...src.matchAll(/export async function (\w+)/g)].map((m) => m[1]).sort();
-    expect(exported).toEqual(["markAccepted", "markRejected", "markSubmitted", "openClaim", "recordRemittance", "resubmit", "returnToDraft", "saveMember", "updateClaim"]);
+    expect(exported).toEqual(["markAccepted", "markRejected", "markSubmitted", "openClaim", "recordRemittance", "resubmit", "returnToDraft", "saveMember", "searchIcd10", "updateClaim"]);
     expect(src).not.toMatch(/export (?!async function)/); // a "use server" file exports async functions only
     for (const name of exported) {
       if (name === "markSubmitted" || name === "resubmit") continue; // thin wrappers around send(), which gates itself
       const body = src.slice(src.indexOf(`export async function ${name}`)).split(/\nexport /)[0];
-      expect(body, name).toMatch(/await requireRole\(\[\.\.\.STAFF\]\)/);
+      // the code search is for the practitioner alone: the admin cannot write diagnosis codes and has no reason to browse them
+      expect(body, name).toMatch(name === "searchIcd10" ? /await requireRole\(\[\.\.\.PSY\]\)/ : /await requireRole\(\[\.\.\.STAFF\]\)/);
     }
+    expect(src).toMatch(/const PSY = \["psychologist"\] as const/);
     expect(src.slice(src.indexOf("async function send("))).toMatch(/^async function send\([^]*?await requireRole\(\[\.\.\.STAFF\]\)/);
   });
   it("the Claims link and the Medical aid tab are psychologist / admin only; the bookkeeper and associate see neither", () => {
@@ -143,7 +145,7 @@ describe("ICD-10 codes stay on the claim itself", () => {
 
 describe("the manual submission note", () => {
   it("is shown, word for word, on the list, the new claim page and the claim page", () => {
-    expect(MANUAL_SUBMISSION_NOTE).toBe("Submission is tracked manually in this version: submit through your scheme or clearing house and record the outcome here.");
+    expect(MANUAL_SUBMISSION_NOTE).toBe("Submission is tracked manually in this version; submit through your scheme or clearing house and record the outcome here.");
     for (const f of pages) expect(read(f), rel(f)).toMatch(/\{MANUAL_SUBMISSION_NOTE\}/);
   });
 });

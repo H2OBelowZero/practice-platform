@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { uuid } from "@/lib/billing/input";
-import { PAYER_LABEL, METHOD_LABEL } from "@/lib/billing/list";
+import { PAYER_LABEL, METHOD_LABEL, paymentRef } from "@/lib/billing/list";
 import { payNowAllowed } from "@/lib/billing/pay-now";
 import { portionSummary } from "@/lib/billing/portions";
 import { requireRole } from "@/lib/auth/session";
@@ -190,7 +190,7 @@ export default async function PortalInvoice({ params, searchParams }: { params: 
                   <tr key={p.id} className="border-t border-line align-top">
                     <td className="px-4 py-3 whitespace-nowrap">{sastDayShort(p.received_on, true)}</td>
                     <td className="px-4 py-3">{p.method === "medical_aid" ? "Paid by your medical aid" : (METHOD_LABEL[p.method] ?? p.method)}</td>
-                    <td className="px-4 py-3 break-all">{p.reference ?? p.gateway_ref ?? <span className="text-ink-muted">None</span>}</td>
+                    <td className="px-4 py-3 break-all">{paymentRef(p) ?? <span className="text-ink-muted">None</span>}</td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">{formatZar(p.amount_cents)}</td>
                     <td className="px-4 py-3">
                       {hasPortalReceipt(p.method)

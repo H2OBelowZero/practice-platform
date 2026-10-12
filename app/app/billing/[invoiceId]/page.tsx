@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireRole } from "@/lib/auth/session";
-import { invoiceAuditFilter, invoiceEventText, isOverdue, METHOD_LABEL, PAYER_LABEL, ROLE_LABEL } from "@/lib/billing/list";
+import { invoiceAuditFilter, invoiceEventText, isOverdue, METHOD_LABEL, PAYER_LABEL, paymentRef, ROLE_LABEL } from "@/lib/billing/list";
 import { billingNotice } from "@/lib/billing/notices";
 import { defaultDueDate, uuid } from "@/lib/billing/input";
 import { outstandingCents } from "@/lib/billing/outstanding";
@@ -222,7 +222,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                     <tr key={p.id} className="border-t border-line align-top">
                       <td className="px-4 py-3 whitespace-nowrap">{day(p.received_on)}</td>
                       <td className="px-4 py-3">{METHOD_LABEL[p.method] ?? p.method}</td>
-                      <td className="px-4 py-3 break-all">{p.reference ?? p.gateway_ref ?? <span className="text-ink-muted">None</span>}</td>
+                      <td className="px-4 py-3 break-all">{paymentRef(p) ?? <span className="text-ink-muted">None</span>}</td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">{formatZar(p.amount_cents)}</td>
                       <td className="px-4 py-3">{p.recorded_by ? (ROLE_LABEL[roleOf.get(p.recorded_by) ?? ""] ?? "Staff") : "System"}</td>
                       <td className="px-4 py-3"><Link href={`/app/billing/${inv.id}/receipts/${p.id}`} aria-label={`Receipt for ${formatZar(p.amount_cents)} received ${day(p.received_on)}`}>Receipt</Link></td>

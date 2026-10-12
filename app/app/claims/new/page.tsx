@@ -36,15 +36,14 @@ export default async function NewClaimPage({ searchParams }: { searchParams: Pro
   if (!inv) notFound();
 
   const psychologist = me.role === "psychologist";
-  const [claimsR, memberR, patientR, lineR, codeR] = await Promise.all([
+  const [claimsR, memberR, patientR, lineR] = await Promise.all([
     sb.from("claims").select("id, status, claimed_cents").eq("invoice_id", inv.id),
     sb.from("medical_aid_members").select("id, scheme, plan, dependant_code, valid_from, valid_to").eq("patient_id", inv.patient_id).order("valid_from", { ascending: false, nullsFirst: false }),
     sb.from("patients").select("first_name, last_name").eq("id", inv.patient_id).maybeSingle(),
     sb.from("invoice_lines").select("tariff_code").eq("invoice_id", inv.id).not("tariff_code", "is", null).limit(1),
-    psychologist ? sb.from("icd10_codes").select("code, description").order("code").limit(1000) : Promise.resolve({ data: [], error: null }),
   ]);
   const back = <Link href={`/app/billing/${inv.id}`}>Back to invoice {inv.number}</Link>;
-  if (claimsR.error || memberR.error || codeR.error) {
+  if (claimsR.error || memberR.error) {
     return <><PageHeader title="Open a medical aid claim" description={back} /><Notice tone="error">We could not load what is needed for a claim. Please refresh the page.</Notice></>;
   }
 
@@ -78,7 +77,7 @@ export default async function NewClaimPage({ searchParams }: { searchParams: Pro
             <ClaimFields
               members={members.map((m) => ({ id: m.id, label: label(m) }))}
               initial={{ memberId: members[0].id, amount: formatZarInput(remaining), tariff: TARIFF.test(tariffGuess) ? tariffGuess : "", preauth: "", icd10: [] }}
-              codes={(codeR.data ?? []) as { code: string; description: string }[]} canChooseCodes={psychologist}
+              canChooseCodes={psychologist}
               maxAmountHint={`At most ${formatZar(remaining)} (what is left of the medical aid portion).`} />
           </KeepForm>
           {!psychologist && <p className="mt-4 text-sm text-ink-muted">The claim is created as a draft without diagnosis codes. The practitioner adds them before it can be marked as submitted.</p>}

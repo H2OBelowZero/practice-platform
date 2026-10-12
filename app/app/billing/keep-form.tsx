@@ -31,7 +31,7 @@ export function KeepForm<A extends unknown[]>({ action, args, children, submitLa
 
   return (
     <FieldErrorContext.Provider value={{ field: state?.field, error: state?.error }}>
-      <form ref={formRef} onSubmit={(e) => { e.preventDefault(); if (confirm) setConfirming(true); else send(); }}>
+      <form ref={formRef} noValidate onSubmit={(e) => { e.preventDefault(); if (confirm) setConfirming(true); else send(); }}>
         <FormError message={state?.error} state={state} />
         {children}
         {confirming && confirm ? (

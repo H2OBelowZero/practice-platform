@@ -8,8 +8,9 @@ import type { ActionState, Values } from "@/lib/appointments/types";
 import { requireRole } from "@/lib/auth/session";
 import { loadOutstanding } from "@/lib/billing/outstanding";
 import { CLAIM_ERROR, claimErrorCode, claimErrorText } from "@/lib/claims/errors";
-import { parseApproved, parseClaimForm, parseClaimRef, parseMemberForm, parseRejection, parseRemittance, uuid } from "@/lib/claims/input";
-import { ACTION_FROM, ACTION_TO, claimableCents, isCurrentMember, submitReadiness, unpaidCents } from "@/lib/claims/rules";
+import { icd10Query, parseApproved, parseClaimForm, parseClaimRef, parseMemberForm, parseRejection, parseRemittance, uuid } from "@/lib/claims/input";
+import { ICD10_RESULTS_MAX, icd10SearchWords, icd10WordFilter, mapIcd10Rows, type Icd10 } from "@/lib/claims/icd10";
+import { ACCEPT_FROM, ACTION_FROM, ACTION_TO, claimableCents, claimBasisCents, isCurrentMember, submitReadiness, unpaidCents, type ClaimStatus } from "@/lib/claims/rules";
 import type { PatientNoticeCode } from "@/lib/patients/notices";
 import { formatZar } from "@/lib/money";
 import { supabaseServer } from "@/lib/supabase/server";
@@ -20,6 +21,7 @@ import { sastDate } from "@/lib/time";
 // AUDIT: ids and field NAMES only. Never an ICD-10 code, a rejection reason, a member number or a reference in an audit row, a log, a URL or a title.
 // Scheme payments are audited by record_scheme_remittance itself (claim.remittance); the app never writes the ledger tables directly.
 const STAFF = ["psychologist", "admin"] as const;
+const PSY = ["psychologist"] as const;
 const generic = { error: CLAIM_ERROR.generic };
 const NOT_FOUND = { error: CLAIM_ERROR.unknown_claim };
 const STALE = { error: CLAIM_ERROR.invalid_claim_transition };
@@ -206,22 +208,25 @@ export async function markSubmitted(rawId: unknown, values: Values): Promise<Act
 /** rejected -> submitted again, unchanged (the history stays in claim_events). To change the claim first, use returnToDraft. */
 export async function resubmit(rawId: unknown, values: Values): Promise<ActionState> { return send(rawId, values, "resubmit"); }
 
-/** submitted -> accepted, with the amount the scheme approved (never more than was claimed). */
+/**
+ * submitted (or part paid, while no approved amount is recorded) -> accepted, with the amount the scheme approved (never more than was claimed).
+ * If the scheme has already paid at least that much, the database makes the claim paid in the same step (0020) and the notice says so.
+ */
 export async function markAccepted(rawId: unknown, values: Values): Promise<ActionState> {
   await requireRole([...STAFF]);
   const sb = await supabaseServer();
   const ctx = await loadClaim(sb, rawId);
   if (!ctx) return NOT_FOUND;
   const { claim, patientId } = ctx;
-  if (claim.status !== ACTION_FROM.accept) return STALE;
+  if (!ACCEPT_FROM.includes(claim.status as ClaimStatus) || (claim.status === "part_paid" && claim.approved_cents !== null)) return STALE;
   const a = parseApproved(values);
   if (!a.ok) return { error: a.error, field: "approved" };
   if (a.value.approvedCents > claim.claimed_cents) return { error: `The approved amount cannot be more than the amount claimed (${formatZar(claim.claimed_cents)}).`, field: "approved" };
-  const { data, error } = await sb.from("claims").update({ status: ACTION_TO.accept, approved_cents: a.value.approvedCents }).eq("id", claim.id).eq("status", ACTION_FROM.accept).select("id");
+  const { data, error } = await sb.from("claims").update({ status: ACTION_TO.accept, approved_cents: a.value.approvedCents }).eq("id", claim.id).eq("status", claim.status).select("id, status");
   if (error) return { error: claimErrorText(error.message) };
   if (!data?.length) return STALE;
   await safely("claim.accept", () => audit("claim.accept", "claims", claim.id, ids(claim, patientId)));
-  return done(claim.id, "accepted");
+  return done(claim.id, (data[0] as { status: string }).status === "paid" ? "accepted_paid" : "accepted");
 }
 
 /** submitted -> rejected, with a reason. The database logs the reason in claim_events and raises the follow-up task (0019); the audit row carries no reason. */
@@ -272,12 +277,15 @@ export async function recordRemittance(rawId: unknown, values: Values): Promise<
   if (!p.ok) return { error: p.error, field: p.field };
 
   // No pre-checks on purpose: the database looks at the replay of a reference first, so a repeated submit stays a quiet no-op.
+  // We only look first to tell the person that nothing new was recorded (the same reference and amount on this claim again).
+  const { data: prior } = await sb.from("claim_payments").select("amount_cents").eq("claim_id", claim.id).eq("remittance_ref", p.value.ref).maybeSingle();
+  const replay = !!prior && Number((prior as { amount_cents: number }).amount_cents) === p.value.amountCents;
   const { error } = await sb.rpc("record_scheme_remittance", { p_claim: claim.id, p_amount: p.value.amountCents, p_ref: p.value.ref });
   if (error) {
     const code = claimErrorCode(error.message);
     if (code === "remittance_exceeds_claim") {
       const { data: rows } = await sb.from("claim_payments").select("amount_cents").eq("claim_id", claim.id);
-      const unpaid = unpaidCents(claim.claimed_cents, (rows ?? []).reduce((s, r) => s + Number((r as { amount_cents: number }).amount_cents), 0));
+      const unpaid = unpaidCents(claimBasisCents(claim), (rows ?? []).reduce((s, r) => s + Number((r as { amount_cents: number }).amount_cents), 0));
       return { error: `That is more than is still unpaid on this claim (${formatZar(unpaid)}).`, field: "amount" };
     }
     if (code === "overpay") {
@@ -286,5 +294,23 @@ export async function recordRemittance(rawId: unknown, values: Values): Promise<
     }
     return { error: CLAIM_ERROR[code], field: code === "ref_conflict" || code === "ref_required" ? "ref" : code === "invalid_amount" ? "amount" : undefined };
   }
-  return done(claim.id, "remitted");
+  return done(claim.id, replay ? "remitted_again" : "remitted");
+}
+
+/**
+ * Search the ICD-10 code list for the picker: the psychologist only, 1 to 40 characters, every word must be in the code or the description, at most 50 results
+ * ordered by code, code and description only. The search text goes through the same sanitiser as the patient search and is never logged or audited.
+ */
+export async function searchIcd10(rawQuery: unknown): Promise<{ ok: true; codes: Icd10[] } | { ok: false; error: string }> {
+  await requireRole([...PSY]);
+  const q = icd10Query.safeParse(rawQuery);
+  if (!q.success) return { ok: false, error: q.error.issues[0]?.message ?? "Type a code or a word to search for." };
+  const words = icd10SearchWords(q.data);
+  if (words.length === 0) return { ok: true, codes: [] };
+  const sb = await supabaseServer();
+  let query = sb.from("icd10_codes").select("code, description");
+  for (const w of words) query = query.or(icd10WordFilter(w));
+  const { data, error } = await query.order("code").limit(ICD10_RESULTS_MAX);
+  if (error) return { ok: false, error: "We could not search the code list. Please try again." };
+  return { ok: true, codes: mapIcd10Rows(data) };
 }

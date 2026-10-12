@@ -7,7 +7,10 @@ export const CLAIM_STATUSES = ["draft", "submitted", "accepted", "rejected", "pa
 export type ClaimStatus = (typeof CLAIM_STATUSES)[number];
 export const isClaimStatus = (s: unknown): s is ClaimStatus => typeof s === "string" && (CLAIM_STATUSES as readonly string[]).includes(s);
 
-/** What a person can do with a claim in each status. `remit` = record a scheme payment (record_scheme_remittance accepts submitted, accepted and part_paid). */
+/**
+ * What a person can do with a claim in each status. `remit` = record a scheme payment (record_scheme_remittance accepts submitted, accepted and part_paid).
+ * A part paid claim can still be accepted (the scheme often pays before its advice arrives) until an approved amount has been recorded (0020).
+ */
 export type ClaimAction = "edit" | "submit" | "accept" | "reject" | "resubmit" | "reopen" | "remit";
 const ACTIONS: Record<ClaimStatus, ClaimAction[]> = {
   draft: ["edit", "submit"],
@@ -17,10 +20,13 @@ const ACTIONS: Record<ClaimStatus, ClaimAction[]> = {
   part_paid: ["remit"],
   paid: [],
 };
-export const claimActions = (status: string): ClaimAction[] => (isClaimStatus(status) ? ACTIONS[status] : []);
+export const claimActions = (status: string, o: { approvedCents?: number | null } = {}): ClaimAction[] =>
+  !isClaimStatus(status) ? [] : status === "part_paid" && (o.approvedCents ?? null) === null ? ["accept", "remit"] : ACTIONS[status];
 
 /** The claim status each status-changing action starts from; an action refuses to run from any other (so a stale page cannot do the wrong thing). */
 export const ACTION_FROM = { submit: "draft", accept: "submitted", reject: "submitted", resubmit: "rejected", reopen: "rejected" } as const satisfies Partial<Record<ClaimAction, ClaimStatus>>;
+/** accept also starts from part_paid (only while no approved amount is recorded; the database allows part_paid -> accepted) */
+export const ACCEPT_FROM: readonly ClaimStatus[] = ["submitted", "part_paid"];
 /** The status each of those actions moves the claim to (the database allows exactly these moves). */
 export const ACTION_TO = { submit: "submitted", accept: "accepted", reject: "rejected", resubmit: "submitted", reopen: "draft" } as const satisfies Partial<Record<ClaimAction, ClaimStatus>>;
 
@@ -52,8 +58,14 @@ export function claimableCents(schemeCents: number, claims: { id?: string; statu
   return Math.max(0, schemeCents - used);
 }
 
-/** What the scheme has not yet paid on a claim (claimed minus the remittances recorded against it). */
-export const unpaidCents = (claimedCents: number, remittedCents: number): number => Math.max(0, claimedCents - remittedCents);
+/** What the scheme has to pay on a claim: the approved amount once there is one, else the amount claimed (the same basis record_scheme_remittance caps at, 0020). */
+export const claimBasisCents = (c: { claimed_cents: number; approved_cents: number | null }): number => c.approved_cents ?? c.claimed_cents;
+
+/** What the scheme has not yet paid against that basis (never below zero). */
+export const unpaidCents = (basisCents: number, remittedCents: number): number => Math.max(0, basisCents - remittedCents);
+
+/** A closed claim that the scheme paid less on than was claimed: the shortfall stays on the invoice until it is recovered or written off. */
+export const paidShort = (c: { status: string; claimed_cents: number }, remittedCents: number): boolean => c.status === "paid" && remittedCents < c.claimed_cents;
 
 /** Whole days from the SAST date of `iso` to `today` (never negative); null when there is no date. */
 export function daysSince(iso: string | null | undefined, today: string): number | null {

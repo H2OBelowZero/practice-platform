@@ -12,7 +12,7 @@ import { test, expect, type Page } from "@playwright/test";
 // The seeded icd10_codes table must contain F41.1.
 const STAFF = process.env.E2E_STAFF_STATE, PATIENT_ID = process.env.E2E_MA_PATIENT_ID, PATIENT = process.env.E2E_PATIENT_STATE;
 const ADMIN = process.env.E2E_ADMIN_STATE, MA_INVOICE = process.env.E2E_MA_INVOICE_ID, BOOKKEEPER = process.env.E2E_BOOKKEEPER_STATE;
-const NOTE = "Submission is tracked manually in this version: submit through your scheme or clearing house and record the outcome here.";
+const NOTE = "Submission is tracked manually in this version; submit through your scheme or clearing house and record the outcome here.";
 const run = Date.now().toString(36);
 
 /** a split invoice (R 600,00 for the scheme) for the patient, issued; returns its URL */
@@ -74,12 +74,12 @@ test.describe("medical aid claim workflow", () => {
     await expect(page.getByRole("heading", { name: "Claims", level: 1 })).toBeVisible();
     await expect(page.getByText("F41.1")).toHaveCount(0);
 
-    // a reference is required; the full R 600,00 settles the scheme side
+    // a reference is required (the browser does not block the empty field: the server message appears); the full R 600,00 settles the scheme side
     await page.goto(claimUrl);
     await page.getByLabel("Amount the scheme paid (rand)").fill("600,00");
     await page.getByRole("button", { name: "Record scheme payment" }).click();
     await page.getByRole("group", { name: "Record this scheme payment?" }).getByRole("button", { name: "Yes, record the payment" }).click();
-    await expect(page.getByRole("alert").getByText("Enter the remittance advice number.")).toBeVisible();
+    await expect(page.getByText("Enter the remittance advice number.").first()).toBeVisible();
     await page.getByLabel("Remittance reference").fill(`E2E-RA-${run}`);
     await page.getByRole("button", { name: "Record scheme payment" }).click();
     await page.getByRole("group", { name: "Record this scheme payment?" }).getByRole("button", { name: "Yes, record the payment" }).click();
@@ -111,7 +111,7 @@ test.describe("medical aid claim workflow", () => {
 
     await page.getByRole("button", { name: "Mark as rejected" }).click();
     await page.getByRole("group", { name: "Mark this claim as rejected?" }).getByRole("button", { name: "Yes, mark as rejected" }).click();
-    await expect(page.getByRole("alert").getByText("Give the reason the claim was rejected.")).toBeVisible();
+    await expect(page.getByText("Give the reason the claim was rejected.").first()).toBeVisible();
     await page.getByLabel("Why was it rejected?").fill("Pre-authorisation number missing");
     await page.getByRole("button", { name: "Mark as rejected" }).click();
     await page.getByRole("group", { name: "Mark this claim as rejected?" }).getByRole("button", { name: "Yes, mark as rejected" }).click();

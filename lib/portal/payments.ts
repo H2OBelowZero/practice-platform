@@ -1,4 +1,4 @@
-import { isOverdue, METHOD_LABEL } from "@/lib/billing/list";
+import { isOverdue, METHOD_LABEL, paymentRef } from "@/lib/billing/list";
 import { payNowAllowed, type PayNow } from "@/lib/billing/pay-now";
 import { formatZar } from "@/lib/money";
 import { sastDayShort } from "@/lib/time";
@@ -177,7 +177,7 @@ export function receiptView(o: {
     practiceName: o.practice?.name || "Practice", practiceNumber: o.practice?.registration_no || null, hpcsaNumber: o.practice?.hpcsa_no || null,
     invoiceNumber: invoice.number, patientName: o.patient ? `${o.patient.first_name} ${o.patient.last_name}`.trim() : null,
     dateReceived: sastDayShort(payment.received_on, true), method: METHOD_LABEL[payment.method] ?? payment.method,
-    reference: payment.reference ?? payment.gateway_ref ?? null, amount: formatZar(payment.amount_cents),
+    reference: paymentRef(payment), amount: formatZar(payment.amount_cents),
     vatNote: invoice.vat_cents > 0
       ? `Invoice ${invoice.number} totals ${formatZar(invoice.total_cents)}, which includes VAT of ${formatZar(invoice.vat_cents)}.`
       : `No VAT is charged on invoice ${invoice.number}.`,

@@ -30,7 +30,7 @@ export function RemittanceFields({ unpaid, unpaidLabel }: { unpaid: string; unpa
     <div className="grid gap-x-4 sm:grid-cols-2">
       <Input id="amount" label="Amount the scheme paid (rand)" required inputMode="decimal" defaultValue={unpaid} hint={`Still unpaid on this claim: ${unpaidLabel}.`} error={err("amount")} />
       <Input id="ref" label="Remittance reference" required maxLength={REMITTANCE_REF_MAX} autoComplete="off"
-             hint="Use the remittance advice number from the scheme. Entering the same reference and amount again does not record the payment twice." error={err("ref")} />
+             hint="Use the remittance advice number. The same number can be used for several claims. Entering the same number and amount again for this claim does not record the payment twice." error={err("ref")} />
     </div>
   );
 }

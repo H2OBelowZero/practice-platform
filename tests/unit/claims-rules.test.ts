@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseApproved, parseClaimForm, parseClaimRef, parseMemberForm, parseRejection, parseRemittance } from "@/lib/claims/input";
+import { icd10Query, parseApproved, parseClaimForm, parseClaimRef, parseMemberForm, parseRejection, parseRemittance } from "@/lib/claims/input";
 import { claimErrorCode, claimErrorText, CLAIM_ERROR } from "@/lib/claims/errors";
-import { filterIcd10, parseIcd10List } from "@/lib/claims/icd10";
-import { ACTION_FROM, ACTION_TO, CLAIM_STATUSES, claimableCents, claimActions, daysSince, isCurrentMember, isStale, memberState, staleBefore, submitReadiness, unpaidCents } from "@/lib/claims/rules";
-import { claimEventDetail, claimEventText, claimNotice, CLAIM_STATUS_FILTERS, parseClaimStatusFilter } from "@/lib/claims/view";
+import { ICD10_RESULTS_MAX, icd10SearchWords, icd10WordFilter, mapIcd10Rows, parseIcd10List } from "@/lib/claims/icd10";
+import { ACTION_FROM, ACTION_TO, CLAIM_STATUSES, claimableCents, claimActions, claimBasisCents, daysSince, isCurrentMember, isStale, memberState, paidShort, staleBefore, submitReadiness, unpaidCents } from "@/lib/claims/rules";
+import { claimEventDetail, claimEventText, claimNotice, CLAIM_STATUS_FILTERS, parseClaimStatusFilter, timelineEvents } from "@/lib/claims/view";
 import { statusMeta } from "@/lib/status";
 
 const M = "3f6b2c1e-5a7d-4e2b-9c1a-0d4f6a8b2c3d";
@@ -93,6 +93,7 @@ describe("action forms", () => {
     expect(parseRemittance({ amount: "300" })).toMatchObject({ ok: false, field: "ref" });
     expect(parseRemittance({ amount: "0", ref: "R" })).toMatchObject({ ok: false, field: "amount" });
     expect(parseRemittance({ amount: "3", ref: "x".repeat(101) })).toMatchObject({ ok: false, field: "ref" });
+    expect(parseRemittance({ amount: "3", ref: "RA#1" })).toMatchObject({ ok: false, field: "ref" }); // # joins the advice number and the claim id in the stored reference
   });
 });
 
@@ -102,7 +103,9 @@ describe("status / action matrix", () => {
     expect(claimActions("submitted")).toEqual(["accept", "reject", "remit"]);
     expect(claimActions("accepted")).toEqual(["remit"]);
     expect(claimActions("rejected")).toEqual(["resubmit", "reopen"]);
-    expect(claimActions("part_paid")).toEqual(["remit"]);
+    expect(claimActions("part_paid")).toEqual(["accept", "remit"]); // the scheme may pay before its advice of acceptance arrives
+    expect(claimActions("part_paid", { approvedCents: 50000 })).toEqual(["remit"]); // once an approved amount is recorded there is nothing left to accept
+    expect(claimActions("submitted", { approvedCents: 1 })).toEqual(["accept", "reject", "remit"]);
     expect(claimActions("paid")).toEqual([]);
     expect(claimActions("bogus")).toEqual([]);
     expect(CLAIM_STATUSES.every((s) => Array.isArray(claimActions(s)))).toBe(true);
@@ -160,6 +163,21 @@ describe("members, amounts, ages", () => {
     expect(claimableCents(10000, cl)).toBe(0);
   });
   it("unpaidCents never goes below zero", () => { expect(unpaidCents(80000, 30000)).toBe(50000); expect(unpaidCents(80000, 90000)).toBe(0); });
+  it("what the scheme owes is based on the approved amount once there is one, else the claimed amount", () => {
+    const notYet = { claimed_cents: 80000, approved_cents: null };
+    const accepted = { claimed_cents: 80000, approved_cents: 50000 };
+    expect(claimBasisCents(notYet)).toBe(80000); // claimed 800, not yet accepted: the basis is 800
+    expect(unpaidCents(claimBasisCents(notYet), 0)).toBe(80000);
+    expect(claimBasisCents(accepted)).toBe(50000); // claimed 800, accepted 500: the default remittance is 500
+    expect(unpaidCents(claimBasisCents(accepted), 0)).toBe(50000);
+    expect(unpaidCents(claimBasisCents(accepted), 30000)).toBe(20000); // after R300 remitted the default is 200
+    expect(unpaidCents(claimBasisCents(accepted), 50000)).toBe(0); // after 500 in total nothing is owed (the database makes the claim paid)
+  });
+  it("paid short: a paid claim with less remitted than claimed gets the write-off hint", () => {
+    expect(paidShort({ status: "paid", claimed_cents: 80000 }, 50000)).toBe(true);
+    expect(paidShort({ status: "paid", claimed_cents: 80000 }, 80000)).toBe(false);
+    expect(paidShort({ status: "part_paid", claimed_cents: 80000 }, 50000)).toBe(false);
+  });
   it("daysSince counts SAST calendar days; staleness is more than 30 days after submission", () => {
     expect(daysSince("2026-10-12T10:00:00+02:00", "2026-10-12")).toBe(0);
     expect(daysSince("2026-10-11T23:30:00Z", "2026-10-13")).toBe(1); // 01:30 SAST on the 12th
@@ -173,20 +191,28 @@ describe("members, amounts, ages", () => {
 });
 
 describe("ICD-10 search and parsing", () => {
-  const list = [
-    { code: "F32.9", description: "Depressive episode, unspecified" }, { code: "F41.1", description: "Generalised anxiety disorder" },
-    { code: "F41.9", description: "Anxiety disorder, unspecified" }, { code: "Z63.0", description: "Problems in relationship with spouse or partner" },
-  ];
-  it("matches by code (with or without the dot, any case) and by words in the description", () => {
-    expect(filterIcd10(list, "f41").map((c) => c.code)).toEqual(["F41.1", "F41.9"]);
-    expect(filterIcd10(list, "f411").map((c) => c.code)).toEqual(["F41.1"]);
-    expect(filterIcd10(list, "ANXIETY").map((c) => c.code)).toEqual(["F41.1", "F41.9"]);
-    expect(filterIcd10(list, "anxiety unspecified").map((c) => c.code)).toEqual(["F41.9"]);
-    expect(filterIcd10(list, "zzz")).toEqual([]);
+  it("search words go through the patient-search sanitiser: PostgREST and ILIKE characters are dropped, the dot splits the code, at most 5 words", () => {
+    expect(icd10SearchWords("F41.1")).toEqual(["f41", "1"]);
+    expect(icd10SearchWords("  Anxiety   DISORDER ")).toEqual(["anxiety", "disorder"]);
+    expect(icd10SearchWords("a%b_c*d,e(f)g\h\"i'j:k")).toEqual(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"].slice(0, 5));
+    expect(icd10SearchWords("%%%")).toEqual([]);
+    expect(icd10SearchWords("one two three four five six seven")).toHaveLength(5);
+    for (const w of icd10SearchWords("x),code.eq.1,(y")) expect(w).not.toMatch(/[,()%*]/);
   });
-  it("an empty search keeps everything and does not mutate the list", () => {
-    expect(filterIcd10(list, "   ")).toHaveLength(4);
-    expect(filterIcd10(list, "")).not.toBe(list);
+  it("each word must be in the code or the description (one `or` per word, chained = AND)", () => {
+    expect(icd10WordFilter("f41")).toBe("code.ilike.%f41%,description.ilike.%f41%");
+  });
+  it("result rows are mapped to code + description only; malformed rows and extra columns are dropped; at most 50", () => {
+    const rows = [{ code: "F41.1", description: "Generalised anxiety disorder", secret: "x" }, { code: "bad code", description: "x" }, { code: "F32.9" }, null, "F41.9", { code: "Z63.0", description: "Problems" }];
+    expect(mapIcd10Rows(rows)).toEqual([{ code: "F41.1", description: "Generalised anxiety disorder" }, { code: "Z63.0", description: "Problems" }]);
+    expect(mapIcd10Rows(null)).toEqual([]);
+    expect(mapIcd10Rows(Array.from({ length: 80 }, (_, i) => ({ code: `F${String(10 + (i % 80)).padStart(2, "0")}`, description: "d" })))).toHaveLength(ICD10_RESULTS_MAX);
+  });
+  it("the search text is 1 to 40 characters", () => {
+    expect(icd10Query.safeParse(" f41 ").success).toBe(true);
+    expect(icd10Query.safeParse("   ").success).toBe(false);
+    expect(icd10Query.safeParse("x".repeat(41)).success).toBe(false);
+    expect(icd10Query.safeParse(undefined).success).toBe(false);
   });
   it("parseIcd10List accepts code-shaped entries only", () => {
     expect(parseIcd10List("F41.1, z63.0,F41.1")).toEqual(["F41.1", "Z63.0"]);
@@ -206,11 +232,15 @@ describe("database errors in plain language", () => {
       ["invoice_not_payable", "invoice_not_payable"], ["claim_not_payable", "claim_not_payable"], ["ref_required", "ref_required"], ["invalid_claim_transition", "invalid_claim_transition"],
       ["claim_frozen", "claim_frozen"], ["claim_link_frozen", "claim_link_frozen"], ["claim_amount_frozen", "claim_amount_frozen"], ["rejection_reason_required", "rejection_reason_required"],
       ['new row for relation "claims" violates check constraint "claims_check"', "amount_over_claimed"],
+      ['new row for relation "claims" violates check constraint "claims_claimed_cents_check"', "invalid_check_amount"],
+      ["invalid_ref", "invalid_ref"], ["icd10_required", "icd10_required"], ["claimed_amount_required", "claimed_amount_required"],
     ];
     for (const [msg, code] of cases) expect(claimErrorCode(msg), msg).toBe(code);
   });
   it("anything else is generic and never echoes the message", () => {
     expect(claimErrorCode("syntax error at or near F41.1")).toBe("generic");
+    expect(claimErrorCode('new row for relation "tasks" violates check constraint "tasks_priority_check"')).toBe("generic"); // a check constraint of another table is not an amount error
+    expect(claimErrorCode('violates check constraint "claims_status_check"')).toBe("generic");
     expect(claimErrorText("connection refused to 10.0.0.5")).toBe(CLAIM_ERROR.generic);
     expect(claimErrorText(undefined)).toBe(CLAIM_ERROR.generic);
   });
@@ -226,9 +256,14 @@ describe("timeline wording", () => {
     expect(claimEventText({ event: "remittance", from_status: "submitted", to_status: "part_paid" })).toMatch(/part paid/);
     expect(claimEventText({ event: "remittance", from_status: "part_paid", to_status: "paid" })).toMatch(/fully paid/);
   });
-  it("leaves out the status change a scheme payment causes (the payment row shows it)", () => {
-    expect(claimEventText({ event: "status:part_paid", from_status: "submitted", to_status: "part_paid" })).toBeNull();
-    expect(claimEventText({ event: "status:paid", from_status: "part_paid", to_status: "paid" })).toBeNull();
+  it("the timeline drops the status row a scheme payment wrote in the same transaction, and keeps a paid row that has no payment beside it", () => {
+    const ev = (id: number, event: string, to: string, at: string) => ({ id, event, to_status: to, at });
+    const rows = [ev(1, "status:draft", "draft", "t1"), ev(2, "status:part_paid", "part_paid", "t2"), ev(3, "remittance", "part_paid", "t2"), ev(4, "status:paid", "paid", "t3")];
+    expect(timelineEvents(rows).map((r) => r.id)).toEqual([1, 3, 4]);
+  });
+  it("leaves out nothing else: unknown rows have no wording", () => {
+    expect(claimEventText({ event: "status:part_paid", from_status: "submitted", to_status: "part_paid" })).toBe("Claim part paid");
+    expect(claimEventText({ event: "status:paid", from_status: "part_paid", to_status: "paid" })).toBe("Claim paid in full");
     expect(claimEventText({ event: "something_else", from_status: null, to_status: null })).toBeNull();
   });
   it("shows the amount and reference of a payment and the reason of a rejection, and nothing from other details", () => {

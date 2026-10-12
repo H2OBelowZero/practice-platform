@@ -5,8 +5,8 @@ import { requireRole } from "@/lib/auth/session";
 import { PAYER_LABEL, ROLE_LABEL } from "@/lib/billing/list";
 import { portionSummary } from "@/lib/billing/portions";
 import { uuid } from "@/lib/claims/input";
-import { claimableCents, claimActions, memberState, submitReadiness, unpaidCents } from "@/lib/claims/rules";
-import { claimEventDetail, claimEventText, claimNotice, MANUAL_SUBMISSION_NOTE } from "@/lib/claims/view";
+import { claimableCents, claimActions, claimBasisCents, memberState, paidShort, submitReadiness, unpaidCents } from "@/lib/claims/rules";
+import { claimEventDetail, claimEventText, claimNotice, MANUAL_SUBMISSION_NOTE, timelineEvents } from "@/lib/claims/view";
 import { formatZar, formatZarInput } from "@/lib/money";
 import { supabaseServer } from "@/lib/supabase/server";
 import { sastDate, sastDateLabel, sastDayShort, sastTime } from "@/lib/time";
@@ -61,7 +61,7 @@ export default async function ClaimPage({ params, searchParams }: { params: Prom
 
   const codes = claim.icd10_codes ?? [];
   const draft = claim.status === "draft";
-  const actions = claimActions(claim.status);
+  const actions = claimActions(claim.status, { approvedCents: claim.approved_cents });
   const [membersR, patientR, eventsR, cpR, creditsR, paysR, siblingsR, codeListR] = await Promise.all([
     sb.from("medical_aid_members").select("id, scheme, plan, member_number, dependant_code, main_member_name, valid_from, valid_to").eq("patient_id", inv.patient_id),
     sb.from("patients").select("first_name, last_name").eq("id", inv.patient_id).maybeSingle(),
@@ -70,9 +70,8 @@ export default async function ClaimPage({ params, searchParams }: { params: Prom
     sb.from("credit_notes").select("portion, amount_cents").eq("invoice_id", inv.id), // reason / created_by are not granted on the table (0018)
     sb.from("payments").select("method, amount_cents").eq("invoice_id", inv.id).eq("status", "succeeded"),
     sb.from("claims").select("id, status, claimed_cents").eq("invoice_id", inv.id),
-    // the whole code list only where the psychologist edits a draft; otherwise just the descriptions of this claim's codes
-    draft && psychologist ? sb.from("icd10_codes").select("code, description").order("code").limit(1000)
-      : codes.length ? sb.from("icd10_codes").select("code, description").in("code", codes).order("code") : Promise.resolve({ data: [], error: null }),
+    // only the descriptions of this claim's codes; the picker searches the rest on the server
+    codes.length ? sb.from("icd10_codes").select("code, description").in("code", codes).order("code") : Promise.resolve({ data: [], error: null }),
   ]);
   const loadFailed = !!(membersR.error || eventsR.error || cpR.error || creditsR.error || paysR.error || siblingsR.error || codeListR.error);
 
@@ -82,7 +81,8 @@ export default async function ClaimPage({ params, searchParams }: { params: Prom
   const patient = patientR.data as { first_name: string; last_name: string } | null;
   const events = (eventsR.data ?? []) as Ev[];
   const remitted = ((cpR.data ?? []) as { amount_cents: number }[]).reduce((s, r) => s + Number(r.amount_cents), 0);
-  const unpaid = unpaidCents(claim.claimed_cents, remitted);
+  const basis = claimBasisCents(claim); // approved once there is an approved amount, else claimed (the basis the database caps remittances at)
+  const unpaid = unpaidCents(basis, remitted);
   const sum = portionSummary({
     status: inv.status, totalCents: inv.total_cents, schemeCents: inv.scheme_portion_cents, patientCents: inv.patient_portion_cents,
     credits: ((creditsR.data ?? []) as { portion: string; amount_cents: number }[]).map((c) => ({ portion: c.portion, amountCents: c.amount_cents })),
@@ -99,7 +99,7 @@ export default async function ClaimPage({ params, searchParams }: { params: Prom
   const actorOf = new Map((profs ?? []).map((p) => [p.user_id as string, `${(p.display_name as string | null) || "Unnamed user"} (${ROLE_LABEL[p.role as string] ?? "Staff"})`]));
 
   const memberLabel = (m: Member) => `${m.scheme}${m.plan ? `, ${m.plan}` : ""}${m.dependant_code ? ` (dependant ${m.dependant_code})` : ""}${memberState(m, today) === "current" ? "" : memberState(m, today) === "expired" ? " - expired" : " - not started yet"}`;
-  const timeline = events.map((e) => ({ e, text: claimEventText(e) })).filter((x): x is { e: Ev; text: string } => x.text !== null);
+  const timeline = timelineEvents(events).map((e) => ({ e, text: claimEventText(e) })).filter((x): x is { e: Ev; text: string } => x.text !== null);
 
   return (
     <>
@@ -135,6 +135,7 @@ export default async function ClaimPage({ params, searchParams }: { params: Prom
             <dt className="font-semibold">Patient owes</dt><dd className="text-right font-semibold">{sum.perPortion ? formatZar(sum.perPortion.patientCents) : "-"}</dd>
           </dl>
           <p className="mt-3 text-sm text-ink-muted">The patient portion is what the patient still owes on the invoice after their own payments and credit notes. Whatever the scheme does not pay stays on the invoice until it is paid or written off with a credit note; it is not claimed again from the scheme.</p>
+          {paidShort(claim, remitted) && <p className="mt-2 font-medium">The scheme paid less than claimed. Write off the shortfall with a credit note (medical aid shortfall) on the invoice if you will not recover it.</p>}
         </Card>
       </section>
 
@@ -159,8 +160,8 @@ export default async function ClaimPage({ params, searchParams }: { params: Prom
             <KeepForm action={updateClaim} args={[claim.id]} submitLabel="Save edits" pendingLabel="Saving…">
               <ClaimFields
                 members={members.filter((m) => memberState(m, today) === "current" || m.id === claim.member_id).map((m) => ({ id: m.id, label: memberLabel(m) }))}
-                initial={{ memberId: claim.member_id, amount: formatZarInput(claim.claimed_cents), tariff: claim.tariff_code ?? "", preauth: claim.preauth_ref ?? "", icd10: codes }}
-                codes={codeList} canChooseCodes={psychologist}
+                initial={{ memberId: claim.member_id, amount: formatZarInput(claim.claimed_cents), tariff: claim.tariff_code ?? "", preauth: claim.preauth_ref ?? "", icd10: codes.map((code) => ({ code, description: codeList.find((x) => x.code === code)?.description ?? "" })) }}
+                canChooseCodes={psychologist}
                 maxAmountHint={`At most ${formatZar(remainingToClaim)} (what is left of the medical aid portion).`} />
             </KeepForm>
           </Card>
@@ -193,6 +194,7 @@ export default async function ClaimPage({ params, searchParams }: { params: Prom
         <section aria-labelledby="accept-h" className="mb-6">
           <h2 id="accept-h" className="mb-4">The scheme accepted the claim</h2>
           <Card>
+            {claim.status === "part_paid" && <p className="mb-4 text-ink-muted">The scheme has already paid {formatZar(remitted)}. Record what it approved: if that is no more than what was paid, the claim becomes paid.</p>}
             <KeepForm action={markAccepted} args={[claim.id]} submitLabel="Mark as accepted" pendingLabel="Saving…"
               confirm={{ title: "Mark this claim as accepted?", yes: "Yes, mark as accepted", body: <p>This records the approved amount. Payment is recorded separately, when the scheme pays.</p> }}>
               <ApprovedField defaultValue={formatZarInput(claim.claimed_cents)} claimed={formatZar(claim.claimed_cents)} />
