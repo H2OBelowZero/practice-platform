@@ -22,7 +22,7 @@ import { cancelAppointmentStaff, confirmAppointment, declineAppointment, markAtt
 export const metadata = { title: "Appointment" };
 
 type Row = {
-  id: string; starts_at: string; ends_at: string; status: string; cancel_reason: string | null;
+  id: string; patient_id: string; starts_at: string; ends_at: string; status: string; cancel_reason: string | null;
   patients: { id: string; first_name: string; last_name: string } | null;
   session_types: { name: string; duration_min: number; format: string; fee_cents: number } | null;
 };
@@ -30,14 +30,14 @@ type Row = {
 const roleWord = (role: string | undefined) => (role === "patient" || role === "guardian" ? "patient or guardian" : role ?? "");
 
 export default async function StaffAppointmentPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ notice?: string }> }) {
-  await requireRole(["psychologist", "admin"]);
+  const me = await requireRole(["psychologist", "admin"]);
   const id = apptId.safeParse((await params).id);
   if (!id.success) notFound();
   const notice = noticeText((await searchParams).notice);
 
   const sb = await supabaseServer();
   const { data } = await sb.from("appointments")
-    .select("id, starts_at, ends_at, status, cancel_reason, patients(id, first_name, last_name), session_types(name, duration_min, format, fee_cents)")
+    .select("id, patient_id, starts_at, ends_at, status, cancel_reason, patients(id, first_name, last_name), session_types(name, duration_min, format, fee_cents)")
     .eq("id", id.data).maybeSingle();
   const appt = data as unknown as Row | null;
   if (!appt) notFound();
@@ -58,6 +58,11 @@ export default async function StaffAppointmentPage({ params, searchParams }: { p
   const last = events[events.length - 1];
   const newId = st === "cancelled" && last?.event === "rescheduled" ? apptId.safeParse(last.detail?.new_id).data : undefined; // moved: link to the replacement
   const back = calendarHref({ view: "week", date: sastDate(appt.starts_at) });
+  // the psychologist's session note for an attended appointment (RLS shows notes to nobody else; the link is also psychologist-only)
+  const { data: noteRows } = me.role === "psychologist" && st === "attended"
+    ? await sb.from("clinical_notes").select("id").eq("appointment_id", appt.id).order("created_at").limit(1)
+    : { data: null };
+  const noteId = noteRows?.[0]?.id as string | undefined;
 
   return (
     <>
@@ -137,6 +142,16 @@ export default async function StaffAppointmentPage({ params, searchParams }: { p
                 </label>
               </div>}
             </ActionForm>
+          </Card>
+        )}
+
+        {st === "attended" && me.role === "psychologist" && (
+          <Card className="mb-4">
+            <h3 className="mb-2 text-lg">Session note</h3>
+            <p className="mb-4 text-ink-muted">{noteId ? "A clinical note has been started for this session." : "No clinical note has been written for this session yet."}</p>
+            {noteId
+              ? <LinkButton href={`/app/notes/${noteId}`} variant="secondary">Open note</LinkButton>
+              : <LinkButton href={`/app/patients/${appt.patient_id}/notes/new?appointment=${appt.id}`} variant="secondary">Write session note</LinkButton>}
           </Card>
         )}
 

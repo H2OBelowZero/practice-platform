@@ -10,6 +10,10 @@ const ACTION_TEXT: Record<string, string> = {
   "form.view": "Opened a submitted form",
   "form.submit": "Form submitted",
   "form.return": "Returned a form for correction",
+  "note.create": "Started a clinical note",
+  "note.view": "Opened a clinical note",
+  "note.sign": "Signed a clinical note",
+  "note.addendum": "Added an addendum to a clinical note",
   "consent.grant": "Consent given",
   "consent.withdraw": "Consent withdrawn",
 };

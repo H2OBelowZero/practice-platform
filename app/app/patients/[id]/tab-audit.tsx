@@ -13,9 +13,10 @@ export async function AuditTab({ patient, sb, query }: TabContext) {
   const { from, to } = pageRange(page);
   const href = (p: number) => hrefWith(`/app/patients/${patient.id}`, { tab: "audit", apage: p > 1 ? p : undefined });
 
-  // form events (request, view, submit, return) are recorded against the submission, everything else against the patient
+  // form events (request, view, submit, return) are recorded against the submission, note events against the note, everything else against the patient
   const { data: subs } = await sb.from("form_submissions").select("id").eq("patient_id", patient.id);
-  const ids = [patient.id, ...(subs ?? []).map((s) => s.id as string)];
+  const { data: notes } = await sb.from("clinical_notes").select("id").eq("patient_id", patient.id); // note events (view, sign, addendum) are recorded against the note; the tab is psychologist-only
+  const ids = [patient.id, ...(subs ?? []).map((s) => s.id as string), ...(notes ?? []).map((n) => n.id as string)];
 
   const res = await sb.from("audit_log").select("id, actor_id, role, action, detail, at", { count: "exact" })
     .in("entity_id", ids).order("id", { ascending: false }).range(from, to);
