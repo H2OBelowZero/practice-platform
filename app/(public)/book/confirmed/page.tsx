@@ -10,7 +10,7 @@ import { LinkButton } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusChip } from "@/components/ui/status-chip";
 
-export const metadata = { title: "Booking received" };
+export const metadata = { title: "Booking received", robots: { index: false, follow: false } };
 
 type Row = {
   starts_at: string; status: string;

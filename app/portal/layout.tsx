@@ -12,6 +12,8 @@ const SettingsLink = () => (
   <Link href="/portal/settings" className="inline-flex min-h-11 items-center rounded-xl px-3 font-medium text-ink no-underline hover:bg-sunk hover:text-ink">Settings</Link>
 );
 
+export const metadata = { robots: { index: false, follow: false } };
+
 // The layout gates the portal, but is NOT the authorisation: every page and server action under /portal calls requireRole itself (R26).
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   await requireRole(["patient", "guardian"]);

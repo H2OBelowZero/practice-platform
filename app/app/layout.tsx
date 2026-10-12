@@ -6,6 +6,8 @@ import { SkipLink } from "@/components/ui/skip-link";
 import { NavLinks } from "@/components/shell/nav-links";
 import { SignOutButton } from "@/components/shell/sign-out";
 
+export const metadata = { robots: { index: false, follow: false } };
+
 // The layout gates the whole workspace, but is NOT the authorisation: every page and server action under /app calls requireRole itself (R26).
 export default async function StaffLayout({ children }: { children: React.ReactNode }) {
   const me = await requireRole(["psychologist", "admin", "bookkeeper", "associate"]);

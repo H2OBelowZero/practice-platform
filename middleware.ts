@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { buildCsp, makeNonce } from "@/lib/security/csp";
 
 const PROTECTED = ["/app", "/portal"];
 const isProtected = (p: string) => PROTECTED.some((x) => p === x || p.startsWith(x + "/"));
@@ -11,6 +12,12 @@ export async function middleware(request: NextRequest) {
   // Pass the current path to Server Components (headers() in requireUser). Always overwritten here, so a client cannot spoof it.
   const forwarded = new Headers(request.headers);
   forwarded.set("x-pathname", request.nextUrl.pathname + request.nextUrl.search);
+  // Per-request CSP nonce (Next's documented pattern): Next reads the CSP from the REQUEST headers and stamps the nonce on its own scripts.
+  // Both are always overwritten, so a client cannot supply its own nonce or policy.
+  const nonce = makeNonce();
+  const csp = buildCsp({ nonce, isDev: process.env.NODE_ENV === "development", supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL });
+  forwarded.set("x-nonce", nonce);
+  forwarded.set("Content-Security-Policy", csp);
   let response = NextResponse.next({ request: { headers: forwarded } });
   const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {
@@ -32,8 +39,10 @@ export async function middleware(request: NextRequest) {
     url.searchParams.set("next", pathname + search);
     const redirect = NextResponse.redirect(url);
     response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
+    redirect.headers.set("Content-Security-Policy", csp);
     return redirect;
   }
+  response.headers.set("Content-Security-Policy", csp);
   return response;
 }
 
