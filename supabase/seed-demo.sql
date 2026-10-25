@@ -185,6 +185,12 @@ begin
   insert into form_submissions(id, patient_id, template_id, answers, status)
   values ('90000000-0000-4000-8000-000000000004', pb, tpl, '{}', 'draft');
   perform submit_form('90000000-0000-4000-8000-000000000004', '{"read_notice":true}', array['privacy_notice']);
+  -- B's permission to share claim information with the medical aid: a claim cannot be marked submitted without it (0032)
+  select id into tpl from form_templates where key = 'share_with_insurer' and version = 1;
+  insert into form_submissions(id, patient_id, template_id, answers, status)
+  values ('90000000-0000-4000-8000-000000000005', pb, tpl, '{}', 'draft');
+  perform submit_form('90000000-0000-4000-8000-000000000005',
+    '{"scheme_name":"Demo Medical Scheme, Demo Plan","member_number":"DEMO-0001","dependant_code":"00","share_insurer":true}', array['share_insurer']);
   perform set_config('request.jwt.claims', claims_psy, true);
 
   -- ---- invoices: always a draft first, lines, then issue --------------------------------------------------------------

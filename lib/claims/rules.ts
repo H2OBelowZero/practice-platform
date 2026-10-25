@@ -41,14 +41,28 @@ export function memberState(m: Member, today: string): MemberState {
 export const isCurrentMember = (m: Member, today: string): boolean => memberState(m, today) === "current";
 
 /**
- * Whether a claim may be marked submitted, and if not, every reason in plain language. The app requires this; the database does not
- * (a draft claim without codes is legal there, which is how the admin can open one).
+ * The patient's share_insurer consent (POPIA; the database refuses a submission without it, 0032): given, given and later withdrawn, or never given.
+ * `row` is the patient's consents row for that purpose, or null when there is none.
  */
-export function submitReadiness(o: { icdCount: number; memberCurrent: boolean; claimedCents: number; role: string }): { ok: boolean; missing: string[] } {
+export type InsurerConsent = "granted" | "withdrawn" | "none";
+export const insurerConsentState = (row: { granted: boolean } | null | undefined): InsurerConsent => (!row ? "none" : row.granted ? "granted" : "withdrawn");
+
+/** Plain-language reason a claim cannot go out for each consent state (none for "granted"). */
+export const INSURER_CONSENT_MISSING: Record<Exclude<InsurerConsent, "granted">, string> = {
+  none: "The patient has not given permission to share information with their medical aid. Ask them to complete the \"Permission to share information with your medical aid\" form (request it on the patient's Consent & forms tab).",
+  withdrawn: "The patient has withdrawn permission to share information with their medical aid. The claim cannot be sent until they give it again on the \"Permission to share information with your medical aid\" form (Consent & forms tab).",
+};
+
+/**
+ * Whether a claim may be marked submitted, and if not, every reason in plain language. The app requires all of it; the database requires the code, the
+ * amount and the share_insurer consent at submission (0020, 0032), the current member only here (a draft without codes is legal, which is how the admin opens one).
+ */
+export function submitReadiness(o: { icdCount: number; memberCurrent: boolean; claimedCents: number; role: string; insurerConsent: InsurerConsent }): { ok: boolean; missing: string[] } {
   const missing: string[] = [];
   if (o.icdCount < 1) missing.push(o.role === "psychologist" ? "Add at least one ICD-10 diagnosis code." : "A diagnosis code is needed, and diagnosis codes are added by the practitioner.");
   if (!o.memberCurrent) missing.push("The medical aid membership is not current. Check its dates on the patient's Medical aid tab, or choose another member.");
   if (!(o.claimedCents > 0)) missing.push("The amount claimed must be more than R 0,00.");
+  if (o.insurerConsent !== "granted") missing.push(INSURER_CONSENT_MISSING[o.insurerConsent]);
   return { ok: missing.length === 0, missing };
 }
 

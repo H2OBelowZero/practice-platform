@@ -4,7 +4,7 @@ import { test, expect, type Page } from "@playwright/test";
 // is payable in the portal) -> the rejection path (which raises a staff task). Needs a running app AND the seeded staging project (Task 17); it cannot run
 // in the local no-Docker setup (R13), so each block skips itself when its inputs are missing.
 //   E2E_STAFF_STATE        storageState of the psychologist, already past TOTP (aal2)
-//   E2E_MA_PATIENT_ID      id of a patient with a CURRENT medical aid member (Medical aid tab) and a portal login
+//   E2E_MA_PATIENT_ID      id of a patient with a CURRENT medical aid member (Medical aid tab), a granted share_insurer consent (0032) and a portal login
 //   E2E_PATIENT_STATE      storageState of that patient (optional: enables the portal check)
 //   E2E_ADMIN_STATE        storageState of the admin (optional: enables the admin checks)
 //   E2E_MA_INVOICE_ID      an ISSUED medical aid invoice of that patient with no claim yet (admin checks)
@@ -59,6 +59,8 @@ test.describe("medical aid claim workflow", () => {
     await expect(page.getByText(NOTE)).toBeVisible();
     await expect(page.getByText("F41.1").first()).toBeVisible();
 
+    await expect(page.getByRole("heading", { name: "Permission to share with the medical aid" })).toBeVisible();
+    await expect(page.getByText("Permission given")).toBeVisible(); // the share_insurer consent (0032) is in place, so the claim can go out
     await page.getByRole("button", { name: "Mark as submitted" }).click();
     await page.getByRole("group", { name: "Mark this claim as submitted?" }).getByRole("button", { name: "Yes, it has been submitted" }).click();
     await page.waitForURL(/notice=submitted/);

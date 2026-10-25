@@ -1,7 +1,7 @@
 import type { Client } from "pg";
 import { it, expect } from "vitest";
 import { withClient, asUser, asService, mkUser } from "./helpers";
-import { seed, mkInvoice, status, count, as, pay, guardianWith } from "./billing-helpers";
+import { seed, mkInvoice, status, count, as, pay, guardianWith, grantInsurerConsent } from "./billing-helpers";
 
 // ---- brief tests (R7 applied; EFT/cash go through a psychologist session because the DB now ties methods to the caller) ----
 async function inv(c: Client, total = 100000) {
@@ -27,6 +27,7 @@ it("claim submission does not change paid state; remittance does and keeps patie
   const { i, p } = await inv(c);
   await c.query("update invoices set scheme_portion_cents=80000, patient_portion_cents=20000 where id=$1", [i]);
   const m = (await c.query("insert into medical_aid_members(patient_id,scheme,member_number) values ($1,'Discovery','123') returning id", [p])).rows[0].id;
+  await grantInsurerConsent(c, p); // 0032: submission needs the share_insurer consent
   const cl = (await c.query("insert into claims(invoice_id,member_id,status,claimed_cents,icd10_codes) values ($1,$2,'submitted',80000,'{F41.1}') returning id", [i, m])).rows[0].id;
   expect((await c.query("select status from invoices where id=$1", [i])).rows[0].status).toBe("issued");
   await c.query("select record_scheme_remittance($1,80000,'REM-1')", [cl]);
@@ -50,6 +51,7 @@ it("setup insert order from the brief works for the owner: issued invoice, porti
   const i = (await c.query("insert into invoices(patient_id,number,total_cents,patient_portion_cents,status) values ($1,'INV-1',100000,100000,'issued') returning id", [p])).rows[0].id;
   await c.query("update invoices set scheme_portion_cents=80000, patient_portion_cents=20000 where id=$1", [i]);
   const m = (await c.query("insert into medical_aid_members(patient_id,scheme,member_number) values ($1,'Discovery','123') returning id", [p])).rows[0].id;
+  await grantInsurerConsent(c, p); // 0032: submission needs the share_insurer consent
   const cl = (await c.query("insert into claims(invoice_id,member_id,status,claimed_cents,icd10_codes) values ($1,$2,'submitted',80000,'{F41.1}') returning id", [i, m])).rows[0];
   const s = (await c.query("select submitted_at from claims where id=$1", [cl.id])).rows[0];
   expect(s.submitted_at).not.toBeNull(); // stamped even for a direct insert
@@ -104,7 +106,8 @@ it("money fields are frozen once issued; due_date stays editable; draft fields a
   expect((await c.query("select issue_date = (now() at time zone 'Africa/Johannesburg')::date as ok from invoices where id=$1", [id])).rows[0].ok).toBe(true); // stamped on issue
   const sets = [`patient_id='${p2}'`, "appointment_id=gen_random_uuid()", "number='ZZ-2'", "issue_date='2031-01-01'",
     "subtotal_cents=2", "discount_cents=2", "vat_cents=2", "total_cents=2", "scheme_portion_cents=1", "patient_portion_cents=1", "payer_type='split'"];
-  for (const s of sets) await expect(as(c, psy, `update invoices set ${s} where id=$1`, [id]), s).rejects.toThrow(/invoice_frozen/);
+  // 0031: the patient and appointment links have their own error (frozen from creation, draft included)
+  for (const s of sets) await expect(as(c, psy, `update invoices set ${s} where id=$1`, [id]), s).rejects.toThrow(/^(patient_id|appointment_id)/.test(s) ? /invoice_link_frozen/ : /invoice_frozen/);
   const r = await as(c, psy, "update invoices set due_date='2031-02-02' where id=$1", [id]);
   expect(r.rowCount).toBe(1);
   expect((await c.query("select due_date::text d from invoices where id=$1", [id])).rows[0].d).toBe("2031-02-02");

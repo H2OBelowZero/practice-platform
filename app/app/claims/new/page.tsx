@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireRole } from "@/lib/auth/session";
-import { claimableCents, isCurrentMember } from "@/lib/claims/rules";
+import { claimableCents, INSURER_CONSENT_MISSING, insurerConsentState, isCurrentMember } from "@/lib/claims/rules";
 import { TARIFF, uuid } from "@/lib/claims/input";
 import { MANUAL_SUBMISSION_NOTE } from "@/lib/claims/view";
 import { PAYER_LABEL } from "@/lib/billing/list";
@@ -36,11 +36,12 @@ export default async function NewClaimPage({ searchParams }: { searchParams: Pro
   if (!inv) notFound();
 
   const psychologist = me.role === "psychologist";
-  const [claimsR, memberR, patientR, lineR] = await Promise.all([
+  const [claimsR, memberR, patientR, lineR, consentR] = await Promise.all([
     sb.from("claims").select("id, status, claimed_cents").eq("invoice_id", inv.id),
     sb.from("medical_aid_members").select("id, scheme, plan, dependant_code, valid_from, valid_to").eq("patient_id", inv.patient_id).order("valid_from", { ascending: false, nullsFirst: false }),
     sb.from("patients").select("first_name, last_name").eq("id", inv.patient_id).maybeSingle(),
     sb.from("invoice_lines").select("tariff_code").eq("invoice_id", inv.id).not("tariff_code", "is", null).limit(1),
+    sb.from("consents").select("granted").eq("patient_id", inv.patient_id).eq("purpose", "share_insurer").maybeSingle(),
   ]);
   const back = <Link href={`/app/billing/${inv.id}`}>Back to invoice {inv.number}</Link>;
   if (claimsR.error || memberR.error) {
@@ -51,6 +52,8 @@ export default async function NewClaimPage({ searchParams }: { searchParams: Pro
   const remaining = claimableCents(inv.scheme_portion_cents, (claimsR.data ?? []) as { id: string; status: string; claimed_cents: number }[]);
   const members = ((memberR.data ?? []) as Member[]).filter((m) => isCurrentMember(m, today));
   const patient = patientR.data as { first_name: string; last_name: string } | null;
+  // POPIA: a draft may be prepared, but it cannot be marked submitted until the patient has given share_insurer consent (0032)
+  const insurerConsent = consentR.error ? "none" : insurerConsentState(consentR.data as { granted: boolean } | null);
   const tariffGuess = ((lineR.data ?? [])[0] as { tariff_code: string | null } | undefined)?.tariff_code ?? "";
   const label = (m: Member) => `${m.scheme}${m.plan ? `, ${m.plan}` : ""}${m.dependant_code ? ` (dependant ${m.dependant_code})` : ""}`;
 
@@ -71,6 +74,14 @@ export default async function NewClaimPage({ searchParams }: { searchParams: Pro
         </dl>
       </Card>
       <Notice tone="info" title="Manual submission"><p>{MANUAL_SUBMISSION_NOTE}</p></Notice>
+      {insurerConsent === "granted" ? (
+        <Notice tone="success" title="Permission given"><p>The patient has given permission to share claim information with their medical aid.</p></Notice>
+      ) : (
+        <Notice tone="warning" title="No permission to share with the medical aid">
+          <p>{INSURER_CONSENT_MISSING[insurerConsent]} You can prepare a draft now, but it cannot be marked as submitted until permission is given.</p>
+          <p className="mt-2"><Link href={`/app/patients/${inv.patient_id}?tab=forms`}>Open the patient&apos;s Consent &amp; forms tab</Link></p>
+        </Notice>
+      )}
       {stop ?? (
         <Card>
           <KeepForm action={openClaim} args={[inv.id]} submitLabel="Create draft claim" pendingLabel="Creating…">

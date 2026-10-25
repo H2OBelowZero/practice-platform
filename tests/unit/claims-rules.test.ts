@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import { icd10Query, parseApproved, parseClaimForm, parseClaimRef, parseMemberForm, parseRejection, parseRemittance } from "@/lib/claims/input";
 import { claimErrorCode, claimErrorText, CLAIM_ERROR } from "@/lib/claims/errors";
 import { ICD10_RESULTS_MAX, icd10SearchWords, icd10WordFilter, mapIcd10Rows, parseIcd10List } from "@/lib/claims/icd10";
-import { ACTION_FROM, ACTION_TO, CLAIM_STATUSES, claimableCents, claimActions, claimBasisCents, daysSince, isCurrentMember, isStale, memberState, paidShort, staleBefore, submitReadiness, unpaidCents } from "@/lib/claims/rules";
+import { ACTION_FROM, ACTION_TO, CLAIM_STATUSES, claimableCents, claimActions, claimBasisCents, daysSince, INSURER_CONSENT_MISSING, insurerConsentState, isCurrentMember, isStale, memberState, paidShort, staleBefore, submitReadiness, unpaidCents } from "@/lib/claims/rules";
 import { claimEventDetail, claimEventText, claimNotice, CLAIM_STATUS_FILTERS, parseClaimStatusFilter, timelineEvents } from "@/lib/claims/view";
 import { statusMeta } from "@/lib/status";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const M = "3f6b2c1e-5a7d-4e2b-9c1a-0d4f6a8b2c3d";
 const member = { scheme: "Discovery", member_number: "12345678" };
@@ -127,12 +129,13 @@ describe("status / action matrix", () => {
 });
 
 describe("submit readiness", () => {
-  const good = { icdCount: 1, memberCurrent: true, claimedCents: 100, role: "psychologist" };
+  const good = { icdCount: 1, memberCurrent: true, claimedCents: 100, role: "psychologist", insurerConsent: "granted" as const };
   it("is ready with a code, a current member and an amount", () => { expect(submitReadiness(good)).toEqual({ ok: true, missing: [] }); });
   it("lists every missing piece in plain language", () => {
-    const r = submitReadiness({ icdCount: 0, memberCurrent: false, claimedCents: 0, role: "psychologist" });
+    const r = submitReadiness({ icdCount: 0, memberCurrent: false, claimedCents: 0, role: "psychologist", insurerConsent: "none" });
     expect(r.ok).toBe(false);
-    expect(r.missing).toHaveLength(3);
+    expect(r.missing).toHaveLength(4);
+    expect(r.missing.join(" ")).toMatch(/permission to share information with their medical aid/);
     expect(r.missing.join(" ")).toMatch(/ICD-10/);
     expect(r.missing.join(" ")).toMatch(/membership is not current/);
     expect(r.missing.join(" ")).toMatch(/more than R 0,00/);
@@ -144,6 +147,8 @@ describe("submit readiness", () => {
     expect(submitReadiness({ ...good, icdCount: 0 }).ok).toBe(false);
     expect(submitReadiness({ ...good, memberCurrent: false }).ok).toBe(false);
     expect(submitReadiness({ ...good, claimedCents: 0 }).ok).toBe(false);
+    expect(submitReadiness({ ...good, insurerConsent: "none" }).ok).toBe(false);
+    expect(submitReadiness({ ...good, insurerConsent: "withdrawn" }).missing).toEqual([INSURER_CONSENT_MISSING.withdrawn]);
   });
 });
 
@@ -284,5 +289,36 @@ describe("timeline wording", () => {
     expect(claimNotice("remitted")).toMatch(/scheme payment/);
     expect(claimNotice("<b>")).toBeUndefined();
     expect(claimNotice("constructor")).toBeUndefined();
+  });
+});
+
+describe("share_insurer consent (0032)", () => {
+  it("reads the consents row: none when there is no row, withdrawn when not granted, granted otherwise", () => {
+    expect(insurerConsentState(null)).toBe("none");
+    expect(insurerConsentState(undefined)).toBe("none");
+    expect(insurerConsentState({ granted: false })).toBe("withdrawn");
+    expect(insurerConsentState({ granted: true })).toBe("granted");
+  });
+  it("explains each missing state and points to the form and the Consent & forms tab", () => {
+    for (const t of Object.values(INSURER_CONSENT_MISSING)) {
+      expect(t).toContain("Permission to share information with your medical aid");
+      expect(t).toContain("Consent & forms tab");
+    }
+    expect(INSURER_CONSENT_MISSING.withdrawn).toMatch(/withdrawn/);
+  });
+  it("the database error has its own plain-language text", () => {
+    expect(claimErrorCode("ERROR:  share_insurer_consent_required")).toBe("share_insurer_consent_required");
+    expect(claimErrorText("share_insurer_consent_required")).toMatch(/permission to share information with their medical aid/);
+  });
+  it("the claim pages and the submit action load the consent and link to the patient's Consent & forms tab", () => {
+    const root = join(__dirname, "..", "..");
+    for (const rel of ["app/app/claims/[claimId]/page.tsx", "app/app/claims/new/page.tsx"]) {
+      const src = readFileSync(join(root, ...rel.split("/")), "utf8");
+      expect(src, rel).toMatch(/from\("consents"\)\.select\("granted[^"]*"\)\.eq\("patient_id", inv\.patient_id\)\.eq\("purpose", "share_insurer"\)/);
+      expect(src, rel).toContain("?tab=forms");
+      expect(src, rel).toContain("INSURER_CONSENT_MISSING[insurerConsent]");
+    }
+    const actions = readFileSync(join(root, "app", "app", "claims", "actions.ts"), "utf8");
+    expect(actions).toMatch(/const insurerConsent = await insurerConsentOf\(sb, patientId\);\n  const ready = submitReadiness\(\{[^}]*insurerConsent \}\);/);
   });
 });

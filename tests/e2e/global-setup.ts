@@ -61,6 +61,9 @@ export default async function globalSetup(config: FullConfig) {
     set("E2E_FEE_TASK_ID", tasks?.[0]?.id);
     const members = must(await svc().from("medical_aid_members").select("id").eq("patient_id", SEED.patient.a), "members");
     if (!members?.length) must(await svc().from("medical_aid_members").insert({ patient_id: SEED.patient.a, scheme: "Demo Medical Scheme", plan: "Demo Plan", member_number: "DEMO-A-0001", dependant_code: "00", valid_from: "2024-01-01" }).select("id"), "member");
+    // claims.spec submits claims for patient A: a claim needs the patient's share_insurer consent (0032). Recorded here by the service role (a staff-side
+    // grant, test setup only; patients give it by submitting the "Permission to share information with your medical aid" form). Idempotent.
+    must(await svc().rpc("set_consent", { p_patient: SEED.patient.a, p_purpose: "share_insurer", p_granted: true, p_submission: null }), "share_insurer consent");
     set("E2E_SPLIT_INVOICE_ID", await issuedInvoice({ patientId: SEED.patient.a, payer: "split", totalCents: 95000, schemeCents: 76000 }));
     set("E2E_MA_INVOICE_ID", await issuedInvoice({ patientId: SEED.patient.a, payer: "medical_aid", totalCents: 95000, schemeCents: 95000 }));
     // an unmatched PayFast payment for tasks.spec, raised exactly as the ITN route does (service client, same arguments), so that spec does not depend on workflow C

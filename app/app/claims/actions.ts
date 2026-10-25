@@ -10,7 +10,7 @@ import { loadOutstanding } from "@/lib/billing/outstanding";
 import { CLAIM_ERROR, claimErrorCode, claimErrorText } from "@/lib/claims/errors";
 import { icd10Query, parseApproved, parseClaimForm, parseClaimRef, parseMemberForm, parseRejection, parseRemittance, uuid } from "@/lib/claims/input";
 import { ICD10_RESULTS_MAX, icd10SearchWords, icd10WordFilter, mapIcd10Rows, type Icd10 } from "@/lib/claims/icd10";
-import { ACCEPT_FROM, ACTION_FROM, ACTION_TO, claimableCents, claimBasisCents, isCurrentMember, submitReadiness, unpaidCents, type ClaimStatus } from "@/lib/claims/rules";
+import { ACCEPT_FROM, ACTION_FROM, ACTION_TO, claimableCents, claimBasisCents, insurerConsentState, isCurrentMember, submitReadiness, unpaidCents, type ClaimStatus, type InsurerConsent } from "@/lib/claims/rules";
 import type { PatientNoticeCode } from "@/lib/patients/notices";
 import { formatZar } from "@/lib/money";
 import { supabaseServer } from "@/lib/supabase/server";
@@ -50,6 +50,13 @@ async function memberOf(sb: SupabaseClient, memberId: string, patientId: string 
   if (!patientId) return null;
   const { data } = await sb.from("medical_aid_members").select("id, valid_from, valid_to").eq("id", memberId).eq("patient_id", patientId).maybeSingle();
   return (data as { id: string; valid_from: string | null; valid_to: string | null } | null) ?? null;
+}
+
+/** The patient's share_insurer consent (psychologist and admin may read consents). A failed read counts as "none": never send on a guess. */
+async function insurerConsentOf(sb: SupabaseClient, patientId: string | null): Promise<InsurerConsent> {
+  if (!patientId) return "none";
+  const { data, error } = await sb.from("consents").select("granted").eq("patient_id", patientId).eq("purpose", "share_insurer").maybeSingle();
+  return error ? "none" : insurerConsentState(data as { granted: boolean } | null);
 }
 
 // ---- members --------------------------------------------------------------------------------------------------------------------
@@ -193,7 +200,8 @@ async function send(rawId: unknown, values: Values, kind: "submit" | "resubmit")
   if (!ref.ok) return { error: ref.error, field: "claim_ref" };
 
   const member = await memberOf(sb, claim.member_id, patientId);
-  const ready = submitReadiness({ icdCount: claim.icd10_codes?.length ?? 0, memberCurrent: !!member && isCurrentMember(member, sastDate(new Date())), claimedCents: claim.claimed_cents, role: me.role });
+  const insurerConsent = await insurerConsentOf(sb, patientId);
+  const ready = submitReadiness({ icdCount: claim.icd10_codes?.length ?? 0, memberCurrent: !!member && isCurrentMember(member, sastDate(new Date())), claimedCents: claim.claimed_cents, role: me.role, insurerConsent });
   if (!ready.ok) return { error: `This claim is not ready to be marked as submitted. ${ready.missing.join(" ")}` };
 
   const patch: Record<string, unknown> = { status: ACTION_TO[kind] };

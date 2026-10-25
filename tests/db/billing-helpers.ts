@@ -25,8 +25,14 @@ export async function mkInvoice(c: Client, patient: string, o: { total?: number;
     [patient, total, scheme, o.payer ?? "self", o.status ?? "issued"])).rows[0].id as string;
 }
 
-/** a medical-aid invoice (scheme 80% by default) plus a member of the patient */
+/** superuser setup: the patient's share_insurer consent, which a claim needs before it can be submitted (0032). No audit row, no task. */
+export const grantInsurerConsent = (c: Client, patient: string) => c.query(
+  "insert into consents(patient_id,purpose,granted,granted_at) values ($1,'share_insurer',true,now()) on conflict (patient_id,purpose) do update set granted=true, granted_at=now(), withdrawn_at=null",
+  [patient]);
+
+/** a medical-aid invoice (scheme 80% by default) plus a member of the patient, who has given the share_insurer consent */
 export async function mkMaInvoice(c: Client, patient: string, total = 100000, scheme = 80000) {
+  await grantInsurerConsent(c, patient);
   const i = await mkInvoice(c, patient, { total, scheme, payer: "medical_aid" });
   const m = (await c.query("insert into medical_aid_members(patient_id,scheme,member_number) values ($1,'Discovery','123') returning id", [patient])).rows[0].id as string;
   return { i, m };

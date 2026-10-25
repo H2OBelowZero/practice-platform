@@ -5,7 +5,7 @@ import { requireRole } from "@/lib/auth/session";
 import { PAYER_LABEL, ROLE_LABEL } from "@/lib/billing/list";
 import { portionSummary } from "@/lib/billing/portions";
 import { uuid } from "@/lib/claims/input";
-import { claimableCents, claimActions, claimBasisCents, memberState, paidShort, submitReadiness, unpaidCents } from "@/lib/claims/rules";
+import { claimableCents, claimActions, claimBasisCents, INSURER_CONSENT_MISSING, insurerConsentState, memberState, paidShort, submitReadiness, unpaidCents } from "@/lib/claims/rules";
 import { claimEventDetail, claimEventText, claimNotice, MANUAL_SUBMISSION_NOTE, timelineEvents } from "@/lib/claims/view";
 import { formatZar, formatZarInput } from "@/lib/money";
 import { supabaseServer } from "@/lib/supabase/server";
@@ -62,7 +62,7 @@ export default async function ClaimPage({ params, searchParams }: { params: Prom
   const codes = claim.icd10_codes ?? [];
   const draft = claim.status === "draft";
   const actions = claimActions(claim.status, { approvedCents: claim.approved_cents });
-  const [membersR, patientR, eventsR, cpR, creditsR, paysR, siblingsR, codeListR] = await Promise.all([
+  const [membersR, patientR, eventsR, cpR, creditsR, paysR, siblingsR, codeListR, consentR] = await Promise.all([
     sb.from("medical_aid_members").select("id, scheme, plan, member_number, dependant_code, main_member_name, valid_from, valid_to").eq("patient_id", inv.patient_id),
     sb.from("patients").select("first_name, last_name").eq("id", inv.patient_id).maybeSingle(),
     sb.from("claim_events").select("id, event, from_status, to_status, detail, actor, at").eq("claim_id", claim.id).order("id"),
@@ -72,8 +72,10 @@ export default async function ClaimPage({ params, searchParams }: { params: Prom
     sb.from("claims").select("id, status, claimed_cents").eq("invoice_id", inv.id),
     // only the descriptions of this claim's codes; the picker searches the rest on the server
     codes.length ? sb.from("icd10_codes").select("code, description").in("code", codes).order("code") : Promise.resolve({ data: [], error: null }),
+    // the patient's permission to share claim information with the scheme (POPIA; the database refuses a submission without it, 0032)
+    sb.from("consents").select("granted, granted_at").eq("patient_id", inv.patient_id).eq("purpose", "share_insurer").maybeSingle(),
   ]);
-  const loadFailed = !!(membersR.error || eventsR.error || cpR.error || creditsR.error || paysR.error || siblingsR.error || codeListR.error);
+  const loadFailed = !!(membersR.error || eventsR.error || cpR.error || creditsR.error || paysR.error || siblingsR.error || codeListR.error || consentR.error);
 
   const members = (membersR.data ?? []) as Member[];
   const member = members.find((m) => m.id === claim.member_id) ?? null;
@@ -90,7 +92,9 @@ export default async function ClaimPage({ params, searchParams }: { params: Prom
   });
   const remainingToClaim = claimableCents(inv.scheme_portion_cents, (siblingsR.data ?? []) as { id: string; status: string; claimed_cents: number }[], claim.id);
   const codeList = (codeListR.data ?? []) as { code: string; description: string }[];
-  const ready = submitReadiness({ icdCount: codes.length, memberCurrent: memberIsCurrent, claimedCents: claim.claimed_cents, role: me.role });
+  const consentRow = consentR.data as { granted: boolean; granted_at: string | null } | null;
+  const insurerConsent = consentR.error ? "none" : insurerConsentState(consentRow); // a failed read never counts as consent
+  const ready = submitReadiness({ icdCount: codes.length, memberCurrent: memberIsCurrent, claimedCents: claim.claimed_cents, role: me.role, insurerConsent });
   const notice = claimNotice(sp.notice);
 
   // who did each step: role and name
@@ -123,6 +127,20 @@ export default async function ClaimPage({ params, searchParams }: { params: Prom
           <dt className="text-ink-muted">Claim reference</dt><dd className="font-medium">{claim.claim_ref ?? <span className="font-normal text-ink-muted">None yet</span>}</dd>
         </dl>
       </Card>
+
+      <section aria-labelledby="consent-h" className="mb-6">
+        <h2 id="consent-h" className="mb-4">Permission to share with the medical aid</h2>
+        {insurerConsent === "granted" ? (
+          <Notice tone="success" title="Permission given">
+            <p>The patient has given permission to share claim information with their medical aid{consentRow?.granted_at ? ` (${day(sastDate(consentRow.granted_at))})` : ""}.</p>
+          </Notice>
+        ) : (
+          <Notice tone="warning" title="This claim cannot be marked as submitted">
+            <p>{INSURER_CONSENT_MISSING[insurerConsent]}</p>
+            <p className="mt-2"><Link href={`/app/patients/${inv.patient_id}?tab=forms`}>Open the patient&apos;s Consent &amp; forms tab</Link></p>
+          </Notice>
+        )}
+      </section>
 
       <section aria-labelledby="amounts-h" className="mb-6">
         <h2 id="amounts-h" className="mb-4">Amounts</h2>

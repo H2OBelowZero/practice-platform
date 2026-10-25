@@ -40,6 +40,7 @@ async function world(c: Client) {
     const sub = (await c.query("insert into form_submissions(patient_id,template_id,template_version,status) values ($1,$2,1,'submitted') returning id", [p, ft])).rows[0].id as string;
     const draft = (await c.query("insert into form_submissions(patient_id,template_id,template_version) values ($1,$2,1) returning id", [p, ft])).rows[0].id as string;
     await c.query("select set_consent($1,'treatment',true,$2)", [p, sub]);
+    await c.query("select set_consent($1,'share_insurer',true,$2)", [p, sub]); // 0032: needed before the claim below can be submitted
     const member = (await c.query("insert into medical_aid_members(patient_id,scheme,member_number) values ($1,'Discovery','123') returning id", [p])).rows[0].id as string;
     // invoice: lines can only be added to a draft, so build it as a draft and issue it (patients never see drafts)
     const inv = (await c.query("insert into invoices(patient_id,subtotal_cents,total_cents,scheme_portion_cents,patient_portion_cents,payer_type) values ($1,100000,100000,80000,20000,'medical_aid') returning id", [p])).rows[0].id as string;
@@ -72,7 +73,7 @@ const READ: [string, Exp, Exp][] = [
   // patient-owned data: exactly this patient's rows
   ["patients", 1, 1], ["appointments", 1, 1], ["appointment_events", 1, 1],
   ["form_submissions", 2, 2], // one submitted + one draft
-  ["form_submission_versions", 1, 1], ["consents", 1, 1],
+  ["form_submission_versions", 1, 1], ["consents", 2, 2], // treatment + share_insurer
   ["invoices", 1, 1], ["invoice_lines", 1, 1], ["credit_notes", 1, 1],
   ["payments", 2, 2], // the manual EFT payment and the scheme remittance
   ["medical_aid_members", 1, 1],
@@ -321,7 +322,7 @@ describe("guardians", () => {
     expect((await rows(c, gNoPay, "appointments")).length).toBe(1);
     expect((await rows(c, gNoPay, "appointment_events")).length).toBe(1);
     expect((await rows(c, gNoPay, "form_submissions")).length).toBe(2);
-    expect((await rows(c, gNoPay, "consents")).length).toBe(1);
+    expect((await rows(c, gNoPay, "consents")).length).toBe(2); // treatment + share_insurer (0032 fixture)
     expect((await rows(c, gNoPay, "patients")).length).toBe(1);
     // the control guardian (pay=true) still sees the billing rows
     expect((await rows(c, w.g, "invoices")).length).toBe(1);

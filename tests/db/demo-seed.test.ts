@@ -14,7 +14,7 @@ const configToml = readFileSync(join(root, "config.toml"), "utf8");
 const block = demo.slice(demo.indexOf("-- BEGIN demo data"), demo.indexOf("-- END demo data"));
 const U = { psy: "a0000000-0000-4000-8000-000000000001", adm: "a0000000-0000-4000-8000-000000000002", bk: "a0000000-0000-4000-8000-000000000003",
   ua: "a0000000-0000-4000-8000-000000000011", ub: "a0000000-0000-4000-8000-000000000012", ug: "a0000000-0000-4000-8000-000000000021" };
-const AUDITED = 11; // invoice.issue x4, payment.record x2 (EFT + remittance), consent.grant x4, appointment.cancel x1
+const AUDITED = 12; // invoice.issue x4, payment.record x2 (EFT + remittance), consent.grant x5 (incl. B's share_insurer, 0032), appointment.cancel x1
 const PA = "b0000000-0000-4000-8000-000000000011", PB = "b0000000-0000-4000-8000-000000000012", PM = "b0000000-0000-4000-8000-000000000014";
 
 async function run(c: Client, o: { optIn?: boolean; templates?: boolean } = {}): Promise<string[]> {
@@ -122,9 +122,10 @@ it("creates the practice setup, patients, guardianship, appointments, forms, bil
   expect((await one(c, "select count(*)::int n from claim_events where to_status = 'submitted'")).n).toBe(2);
   expect(await one(c, "select status from invoices where patient_id = $1", [PM])).toEqual({ status: "issued" });
   // patient B has real rows of every kind the isolation tests claim another patient cannot read
-  expect((await one(c, "select count(*)::int n from consents where patient_id = $1 and granted", [PB])).n).toBe(2);
-  expect((await one(c, "select count(*)::int n from form_submissions where patient_id = $1 and status = 'submitted' and submitted_by = $2", [PB, U.ub])).n).toBe(2);
-  expect((await one(c, "select count(*)::int n from form_submission_versions v join form_submissions s on s.id = v.submission_id where s.patient_id = $1", [PB])).n).toBe(2);
+  expect((await one(c, "select count(*)::int n from consents where patient_id = $1 and granted", [PB])).n).toBe(3); // treatment, privacy_notice, share_insurer (0032)
+  expect((await one(c, "select count(*)::int n from form_submissions where patient_id = $1 and status = 'submitted' and submitted_by = $2", [PB, U.ub])).n).toBe(3);
+  expect((await one(c, "select count(*)::int n from form_submission_versions v join form_submissions s on s.id = v.submission_id where s.patient_id = $1", [PB])).n).toBe(3);
+  expect((await one(c, "select granted, form_submission_id::text f from consents where patient_id = $1 and purpose = 'share_insurer'", [PB]))).toEqual({ granted: true, f: "90000000-0000-4000-8000-000000000005" });
   expect((await one(c, "select count(*)::int n from audit_log where action = 'patient.view' and entity_id = $1", [PB])).n).toBe(1);
   expect((await one(c, "select count(*)::int n from notifications_outbox where recipient = 'patient.b@demo.test' and status = 'sent'")).n).toBe(1);
   // notes: A's is a draft with fictional text; B's is signed, then amended by an addendum, with a risk flag and its psychologist-only task
@@ -184,7 +185,7 @@ it("a seeded patient sees only their own data; the guardian sees the child; staf
     expect((await c.query("select distinct patient_id from invoices")).rows.map((r) => r.patient_id)).toEqual([PB]);
     expect((await c.query("select 1 from medical_aid_members")).rowCount).toBe(1);
     expect((await c.query("select 1 from payments")).rowCount).toBe(1); // B's own remittance payment
-    expect((await c.query("select 1 from consents")).rowCount).toBe(2);
+    expect((await c.query("select 1 from consents")).rowCount).toBe(3); // incl. share_insurer (0032)
     expect((await c.query("select 1 from clinical_notes")).rowCount).toBe(0); // the patient never reads the clinical record
   });
   await asUser(c, U.ug, async () => {

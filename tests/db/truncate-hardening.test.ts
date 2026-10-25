@@ -31,10 +31,15 @@ it("a table created after the migration also starts without them (default privil
     expect((await c.query("select has_table_privilege($1, 'zz_future_table', $2) as ok", [r, p])).rows[0].ok, `${r} ${p}`).toBe(true);
 }));
 
-it("select, insert, update and delete are still granted on existing tables", () => withClient(async (c) => {
-  for (const r of ["authenticated", "service_role"])
+it("select, insert, update and delete are still granted on existing tables (DELETE on patients, tasks and guardianships is revoked by 0031)", () => withClient(async (c) => {
+  for (const r of ["authenticated", "service_role"]) {
     for (const p of ["SELECT", "INSERT", "UPDATE", "DELETE"])
+      expect((await c.query("select has_table_privilege($1, 'appointments', $2) as ok", [r, p])).rows[0].ok, `${r} ${p}`).toBe(true);
+    for (const p of ["SELECT", "INSERT", "UPDATE"])
       expect((await c.query("select has_table_privilege($1, 'patients', $2) as ok", [r, p])).rows[0].ok, `${r} ${p}`).toBe(true);
+    for (const t of ["patients", "tasks", "guardianships"])
+      expect((await c.query("select has_table_privilege($1, $2, 'DELETE') as ok", [r, t])).rows[0].ok, `${r} DELETE ${t}`).toBe(false);
+  }
 }));
 
 it("TRUNCATE as authenticated, service_role and anon fails with permission denied, and the rows survive", () => withClient(async (c) => {
