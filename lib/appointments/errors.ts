@@ -18,7 +18,7 @@ export type ApptErrorCode = keyof typeof APPT_ERROR;
 export function apptErrorCode(message: string | undefined | null): ApptErrorCode {
   const m = message ?? "";
   if (m.includes("already_started")) return "started";
-  if (m.includes("not_cancellable") || m.includes("not_reschedulable") || m.includes("invalid_appointment_transition") || m.includes("appointment_times_frozen")) return "state";
+  if (m.includes("not_cancellable") || m.includes("not_reschedulable") || m.includes("invalid_appointment_transition") || m.includes("appointment_times_frozen") || m.includes("appointment_link_frozen")) return "state";
   if (m.includes("inside_cancellation_window")) return "window";
   if (m.includes("forbidden")) return "forbidden";
   if (m.includes("unknown_appointment")) return "missing";

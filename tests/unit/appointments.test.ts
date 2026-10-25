@@ -10,7 +10,7 @@ describe("error mapping", () => {
   it.each([
     ["already_started", "started"], ["not_cancellable", "state"], ["not_reschedulable", "state"], ["forbidden", "forbidden"],
     ["unknown_appointment", "missing"], ["slot_taken", "taken"], ["start_in_past", "unavailable"], ["outside_hours", "unavailable"],
-    ["blocked_time", "unavailable"], ["beyond_horizon", "unavailable"], ["invalid_appointment_transition", "state"], ["appointment_times_frozen", "state"],
+    ["blocked_time", "unavailable"], ["beyond_horizon", "unavailable"], ["invalid_appointment_transition", "state"], ["appointment_times_frozen", "state"], ["appointment_link_frozen", "state"],
     ["error: slot_taken (P0001)", "taken"], ["permission denied for table x", "generic"], ["", "generic"],
   ])("%s -> %s", (msg, code) => expect(apptErrorCode(msg)).toBe(code));
   it("null and undefined are generic, and no raw database text reaches the user", () => {

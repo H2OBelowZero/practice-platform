@@ -15,7 +15,7 @@ it("psychologist and admin can add, edit, archive and flag patients; associate a
     expect(row.portal_invited_at).not.toBeNull();
   }
   const id = (await c.query("insert into patients(first_name,last_name) values ('C','D') returning id")).rows[0].id;
-  expect((await asUser(c, assoc, () => c.query("select 1 from patients"))).rowCount).toBe(3); // may read all
+  expect((await asUser(c, assoc, () => c.query("select 1 from patients"))).rowCount).toBe(0); // 0031 (M3): the associate has no patient access in Phase 1
   expect((await asUser(c, assoc, () => c.query("update patients set referral_source='x' where id=$1", [id]))).rowCount).toBe(0); // RLS: no row visible to update
   await expect(asUser(c, assoc, () => c.query("insert into patients(first_name,last_name) values ('E','F')"))).rejects.toThrow(/row-level security/);
   expect((await asUser(c, bk, () => c.query("select 1 from patients"))).rowCount).toBe(0);

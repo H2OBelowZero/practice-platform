@@ -9,7 +9,7 @@ describe("billing database errors in plain language", () => {
     ["appointment_not_billable", "appointment_not_billable"], ["appointment_patient_mismatch", "appointment_patient_mismatch"], ["unknown_appointment", "unknown_appointment"],
     ["task_not_open", "task_not_open"], ["zero_total", "zero_total"], ["portions_mismatch", "portions_mismatch"], ["self_pay_has_scheme_portion", "self_pay_has_scheme_portion"],
     ["totals_mismatch", "totals_mismatch"], ["lines_mismatch", "lines_mismatch"], ["lines_required", "lines_required"], ["invalid_line", "invalid_line"], ["invoice_not_draft", "invoice_not_draft"],
-    ["invoice_frozen", "invoice_frozen"], ["invoice_lines_frozen", "invoice_lines_frozen"], ["invoice_void_is_final", "invoice_void_is_final"],
+    ["invoice_frozen", "invoice_frozen"], ["invoice_lines_frozen", "invoice_lines_frozen"], ["invoice_link_frozen", "invoice_link_frozen"], ["invoice_void_is_final", "invoice_void_is_final"],
     ["invalid_invoice_transition", "invalid_invoice_transition"], ["invoice_has_payments", "invoice_has_payments"], ["invoice_has_credits", "invoice_has_credits"], ["invoice_has_open_claims", "invoice_has_open_claims"],
     ["invoice_not_payable", "invoice_not_payable"], ["invoice_not_creditable", "invoice_not_creditable"], ["overpay", "overpay"],
     ["credit_exceeds_outstanding", "credit_exceeds_outstanding"],

@@ -119,8 +119,8 @@ const ATTACKS: Atk[] = [
   ["update B's patient row", (w) => ["update patients set phone='999' where id=$1", [w.p2]], 0],
   ["update every patient but own", (w) => ["update patients set phone='999' where id<>$1", [w.p1]], 0],
   ["take over B's patient row", (w) => ["update patients set user_id=$1 where id=$2", [w.u1, w.p2]], 0],
-  ["delete B's patient row", (w) => ["delete from patients where id=$1", [w.p2]], 0],
-  ["delete own patient row", (w) => ["delete from patients where id=$1", [w.p1]], 0],
+  ["delete B's patient row", (w) => ["delete from patients where id=$1", [w.p2]], NOPRIV("patients")], // 0031: DELETE revoked
+  ["delete own patient row", (w) => ["delete from patients where id=$1", [w.p1]], NOPRIV("patients")],
   ["insert a patient", () => ["insert into patients(first_name,last_name) values ('X','X')", []], RLS("patients")],
   // identity and practice settings
   ["promote own profile to psychologist", (w) => ["update profiles set role='psychologist' where user_id=$1", [w.u1]], 0],
@@ -198,7 +198,7 @@ const ATTACKS: Atk[] = [
   // guardianships (no API role can write them, patients least of all)
   ["make self a guardian of B", (w) => ["insert into guardianships(guardian_user_id,patient_id) values ($1,$2)", [w.u1, w.p2]], RLS("guardianships")],
   ["update B's guardianship", (w) => ["update guardianships set permissions='{}' where patient_id=$1", [w.p2]], 0],
-  ["delete B's guardianship", (w) => ["delete from guardianships where patient_id=$1", [w.p2]], 0],
+  ["delete B's guardianship", (w) => ["delete from guardianships where patient_id=$1", [w.p2]], NOPRIV("guardianships")], // 0031
   // clinical notes
   ["insert a clinical note", (w) => ["insert into clinical_notes(patient_id,author_id) values ($1,$2)", [w.p1, w.u1]], RLS("clinical_notes")],
   ["update B's clinical note", (w) => ["update clinical_notes set risk='{}' where id=$1", [w.b.note]], 0],
@@ -209,7 +209,7 @@ const ATTACKS: Atk[] = [
   // operations tables
   ["insert a task", () => ["insert into tasks(title) values ('x')", []], RLS("tasks")],
   ["update B's task", (w) => ["update tasks set status='done' where patient_id=$1", [w.p2]], 0],
-  ["delete a task", () => ["delete from tasks", []], 0],
+  ["delete a task", () => ["delete from tasks", []], NOPRIV("tasks")], // 0031
   ["insert into the outbox", () => ["insert into notifications_outbox(channel,template,recipient) values ('email','t','x@y.test')", []], NOPRIV("notifications_outbox")],
   ["update the outbox", () => ["update notifications_outbox set status='sent'", []], NOPRIV("notifications_outbox")],
   ["delete from the outbox", () => ["delete from notifications_outbox", []], NOPRIV("notifications_outbox")],

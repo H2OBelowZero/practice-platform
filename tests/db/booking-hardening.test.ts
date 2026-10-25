@@ -52,7 +52,7 @@ describe("patients.portal_invited_at", () => {
     expect(res.rowCount).toBe(0); // RLS: not visible/updatable
     const other = await mkUser(c, "patient");
     await asUser(c, u, async () => {
-      await expect(c.query("update patients set user_id=$2 where id=$1", [mine, other])).rejects.toThrow(GUARD);
+      await expect(c.query("update patients set user_id=$2 where id=$1", [mine, other])).rejects.toThrow(/patient_account_link_protected/); // 0031 (I2)
     });
     expect((await patientRows(c, "id=$1", [pre]))[0].user_id).toBeNull();
   }));

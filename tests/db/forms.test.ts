@@ -71,7 +71,7 @@ it("tasks: only psychologist and admin may write; everyone else is rejected", ()
   for (const u of [bk, u1, g]) {
     await expect(asUser(c, u, () => c.query("insert into tasks(title) values ('no')"))).rejects.toThrow(/row-level security/);
     expect((await asUser(c, u, () => c.query("update tasks set status='done'"))).rowCount).toBe(0);
-    expect((await asUser(c, u, () => c.query("delete from tasks"))).rowCount).toBe(0);
+    await expect(asUser(c, u, () => c.query("delete from tasks"))).rejects.toThrow(/permission denied/); // 0031: no API role deletes tasks
   }
   expect((await c.query("select 1 from tasks where status='done'")).rowCount).toBe(0);
 }));

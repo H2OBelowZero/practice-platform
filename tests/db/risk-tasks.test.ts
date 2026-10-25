@@ -33,14 +33,15 @@ it("the admin cannot insert, change, delete or move a risk task, and the psychol
   const src = `risk_flag:${m.n}`;
   await expect(asUser(c, m.adm, () => c.query("insert into tasks(title,source) values ('x',$1)", [`risk_flag:${m.n2}`]))).rejects.toThrow(/row-level security/);
   expect((await asUser(c, m.adm, () => c.query("update tasks set status='done' where source=$1", [src]))).rowCount).toBe(0);
-  expect((await asUser(c, m.adm, () => c.query("delete from tasks where source=$1", [src]))).rowCount).toBe(0);
+  await expect(asUser(c, m.adm, () => c.query("delete from tasks where source=$1", [src]))).rejects.toThrow(/permission denied/); // 0031
   // an admin cannot turn an ordinary task into a risk task, or the other way round
   const ord = (await c.query("insert into tasks(title,source) values ('o','other') returning id")).rows[0].id;
   await expect(asUser(c, m.adm, () => c.query("update tasks set source=$2 where id=$1", [ord, `risk_flag:${m.n2}`]))).rejects.toThrow(/row-level security/);
   await expect(asUser(c, m.adm, () => c.query("select raise_risk_task($1,'high',$2)", [m.n, TITLE]))).rejects.toThrow(/note_not_found/); // the admin cannot even see the note
   expect(await task(c, m.n)).toHaveLength(1);
   expect((await asUser(c, m.psy, () => c.query("update tasks set status='done' where source=$1", [src]))).rowCount).toBe(1);
-  expect((await asUser(c, m.psy, () => c.query("delete from tasks where source=$1", [src]))).rowCount).toBe(1);
+  // 0031: tasks are never deleted through the API, not even by the psychologist (done is the end state)
+  await expect(asUser(c, m.psy, () => c.query("delete from tasks where source=$1", [src]))).rejects.toThrow(/permission denied/);
 }));
 
 it("raising twice is a no-op: one task per note, assigned to the caller, the level kept in meta", () => withClient(async (c) => {
