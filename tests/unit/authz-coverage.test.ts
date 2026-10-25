@@ -7,7 +7,7 @@ import { join, relative } from "node:path";
  *
  * Every page.tsx, every route.ts handler and every exported server action (any form: declaration, const arrow/function, wrapper call, local re-export) must either
  *   - be in an explicit allow-list below, with a reason (public, or authenticated by its own mechanism), or
- *   - call requireRole( / requireUser( / requireRecoverySession( UNCONDITIONALLY at the top level of its body (not inside if/&&/?:/callbacks), BEFORE its first data access.
+ *   - call requireRole( / requireUser( / requireRecoverySession( UNCONDITIONALLY and AWAITED (or returned) at the top level of its body (not inside if/&&/?:/callbacks), BEFORE its first data access.
  * A failing run names the file (and function). This is a text-level check on purpose: it catches the realistic mistake
  * (a new page or action added without a guard), not a determined attacker. Known limits, so nobody trusts it more than it deserves:
  *   - "data access" means .from( / .rpc( / getPractice( / getCrisisText( / audit( in the function itself or in a function
@@ -135,7 +135,7 @@ function bodyAfterParams(text: string, from: number): string | null {
   return null;
 }
 
-type Fn = { body: string; async: boolean };
+type Fn = { body: string; async: boolean; expr?: boolean };
 type Alias = { alias: string };
 
 /** Where a `const x = <expression>` expression ends: `;`, a line break that is not a continuation, or the block that encloses it closing. */
@@ -162,7 +162,7 @@ function fnFromExpr(expr: string): Fn | Alias | null {
   if (arrow >= 0 && (kw < 0 || arrow < kw)) {
     const rest = expr.slice(arrow + 2).trimStart();
     const body = rest[0] === "{" ? braceInner(rest, 0) : rest;
-    return body === null ? null : { body, async: /\basync\b/.test(expr.slice(0, arrow)) };
+    return body === null ? null : { body, async: /\basync\b/.test(expr.slice(0, arrow)), expr: rest[0] !== "{" };
   }
   if (kw >= 0) { const body = bodyAfterParams(expr, kw); return body === null ? null : { body, async: /\basync\b/.test(expr.slice(0, kw)) }; }
   return null;
@@ -213,8 +213,8 @@ function listExports(code: string): Exp[] {
 }
 
 /** Is the statement that holds the call at `at` run unconditionally, at the top level of `body`? A guard inside if/else, `&&`, `?:`, a callback or a loop does not count. */
-const PREFIX_OK = /^\s*(?:(?:const|let|var)\s+(?:[\w$]+|\{[^}]*\}|\[[^\]]*\])\s*(?::[^=]+)?=\s*)?(?:return\s+)?(?:await\s+)?(?:Promise\.all\(\s*\[\s*)?\(?\s*$/;
-function unconditionalAt(body: string, at: number): boolean {
+const PREFIX_OK = /^\s*(?:(?:const|let|var)\s+(?:[\w$]+|\{[^}]*\}|\[[^\]]*\])\s*(?::[^=]+)?=\s*)?\(?\s*(?:return\s+|await\s+)(?:await\s+)?(?:Promise\.all\(\s*\[\s*)?\(?\s*$/;
+function unconditionalAt(body: string, at: number, exprBody = false): boolean {
   let brace = 0, paren = 0, bracket = 0, start = 0;
   for (let i = 0; i < at; i++) {
     const c = body[i], flat = () => brace === 0 && paren === 0 && bracket === 0;
@@ -224,7 +224,9 @@ function unconditionalAt(body: string, at: number): boolean {
     else if (c === "[") bracket++; else if (c === "]") bracket--;
     else if (c === ";" && flat()) start = i + 1;
   }
-  return brace === 0 && PREFIX_OK.test(body.slice(start, at));
+  const prefix = body.slice(start, at);
+  // the guard must be AWAITED (or returned): a bare `requireRole(...)` is a floating promise that nothing waits for, so the page would run on regardless
+  return brace === 0 && (PREFIX_OK.test(prefix) || (exprBody && prefix.trim() === ""));
 }
 
 type Event = "guard" | "data" | "conditional" | "none";
@@ -243,7 +245,7 @@ function firstEvent(name: string, table: Map<string, Fn | Alias>, seen = new Set
   for (const e of events) {
     const kind = e.kind === "guard" || e.kind === "data" ? e.kind : firstEvent(e.kind, table, seen);
     if (kind === "data") return "data";
-    if (kind === "guard") { if (unconditionalAt(body, e.at)) return "guard"; conditional = true; }
+    if (kind === "guard") { if (unconditionalAt(body, e.at, r.fn.expr)) return "guard"; conditional = true; }
     else if (kind === "conditional") conditional = true;
   }
   return conditional ? "conditional" : "none";
@@ -400,6 +402,21 @@ describe("the tripwire itself catches the mistakes it exists for", () => {
   it("flags data read before the guard", () => {
     fails(action(`export async function doIt() { const { data } = await sb.from("patients").select(); await requireRole(["admin"]); }`), /BEFORE/);
     fails(action(`async function load() { await sb.rpc("x"); }\nexport async function doIt() { await load(); await requireRole(["admin"]); }`), /BEFORE/);
+  });
+  it("requires the guard to be awaited or returned: a floating requireRole(...) fails", () => {
+    fails(action(`export async function doIt() { requireRole(["admin"]); await sb.from("t"); }`), /no requireRole|BEFORE|conditional/);
+    fails(action(`export async function doIt() { requireRole(["admin"]);\n return 1; }`), /no requireRole|conditional/);
+    fails(action(`export async function doIt() { const me = requireRole(["admin"]); await sb.from("t"); }`), /no requireRole|BEFORE|conditional/);
+    fails(action(`export async function doIt() { void requireRole(["admin"]); await sb.from("t"); }`), /no requireRole|BEFORE|conditional/);
+    fails(action(`export async function doIt() { Promise.all([requireRole(["admin"]), getPractice()]); await sb.from("t"); }`), /no requireRole|BEFORE|conditional/);
+    fails(action(`async function load() { requireUser(); }\nexport async function doIt() { await load(); await sb.rpc("x"); }`), /no requireRole|BEFORE|conditional/);
+    // awaited / returned forms still pass
+    expect(action(`export async function doIt() { await requireRole(["admin"]); await sb.from("t"); }`)).toEqual([]);
+    expect(action(`export async function doIt() { const me = await requireUser(); await sb.from("t"); }`)).toEqual([]);
+    expect(action(`export async function doIt() { return await requireRole(["admin"]); }`)).toEqual([]);
+    expect(action(`export async function doIt() { return requireRole(["admin"]); }`)).toEqual([]);
+    expect(action(`export async function doIt() { await Promise.all([requireRole(["admin"]), getPractice()]); await sb.from("t"); }`)).toEqual([]);
+    expect(action(`export async function doIt() { return Promise.all([requireRole(["admin"]), getPractice()]); }`)).toEqual([]);
   });
   it("flags a guard that is only conditional", () => {
     fails(action(`export async function doIt(x: boolean) { if (x) { await requireRole(["admin"]); } return 1; }`), /conditional/);

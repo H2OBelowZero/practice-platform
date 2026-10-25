@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run tests/unit --passWithNoTests",
     "test:db": "vitest run tests/db --no-file-parallelism --passWithNoTests",
-    "test:e2e": "playwright test"
+    "test:e2e": "node scripts/e2e.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.2.0",
