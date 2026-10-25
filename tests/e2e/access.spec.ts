@@ -244,6 +244,23 @@ test.describe("direct API requests (anon key + a user's own token)", () => {
     expect(write.error?.message ?? "").toMatch(/forbidden/);
   });
 
+  test("a staff password without the authenticator code (aal1) reads nothing and the staff functions refuse (two-step is enforced by the database)", async () => {
+    const names = ["clinical_notes", "patients", "invoices", "payments", "form_submissions", "consents", "claims", "claim_summary", "audit_log", "tasks"];
+    await control(names);
+    for (const role of ["psychologist", "admin", "bookkeeper"] as const) {
+      const weak = await apiAs(role, { aal: "aal1" });
+      await blocked(`${role} (aal1)`, weak, names);
+      const pay = await weak.rpc("record_payment", { p_invoice: SEED.invoice.splitClaim, p_method: "eft", p_amount: 100, p_ref: "E2E-AAL1", p_by: null });
+      expect(pay.error?.message ?? "", `${role} aal1 record_payment`).toMatch(/forbidden/);
+      const today = new Date().toISOString().slice(0, 10);
+      const rep = await weak.rpc("report_income_by_month", { p_from: today, p_to: today });
+      expect(rep.error?.message ?? "", `${role} aal1 report`).toMatch(/forbidden/);
+      // its own profile stays readable, so the app can send the person to /mfa
+      const me = visibleRows(await weak.from("profiles").select("role")) as { role: string }[];
+      expect(me.map((r) => r.role)).toEqual([role]);
+    }
+  });
+
   test("an anonymous caller (anon key, no sign-in) reads nothing", async () => {
     const names = ["patients", "appointments", "invoices", "payments", "clinical_notes", "form_submissions", "consents", "audit_log", "tasks"];
     await control(names);

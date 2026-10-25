@@ -240,7 +240,7 @@ it("guards fail closed: a custom login role that is not postgres/superuser is bo
   await c.query("create role app_x login");
   await c.query("grant authenticated to app_x"); // same privileges and policies as a Supabase user, but a different current_user
   await c.query("set local role app_x");
-  await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: psy, role: "authenticated" })]);
+  await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: psy, role: "authenticated", aal: "aal2" })]);
   try {
     await expect(c.query("update invoices set status='paid' where id=$1", [i])).rejects.toThrow(/invalid_invoice_transition/);
     await expect(c.query("update invoices set total_cents=1 where id=$1", [i])).rejects.toThrow(/invoice_frozen/);
@@ -269,7 +269,7 @@ it("guards trust the owner of the table being written, whatever its name", () =>
   } finally { await c.query("reset role"); }
   await c.query("update inv_copy set status='issued'");
   await c.query("set local role app_x2");
-  await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: psy, role: "authenticated" })]);
+  await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: psy, role: "authenticated", aal: "aal2" })]);
   try {
     await expect(c.query("update inv_copy set status='paid'")).rejects.toThrow(/invalid_invoice_transition/); // same table, other role: bound
     await expect(c.query("insert into inv_copy(patient_id,status) values ($1,'issued')", [p1])).rejects.toThrow(/invoice_must_start_as_draft/);

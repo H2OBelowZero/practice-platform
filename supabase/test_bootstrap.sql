@@ -43,10 +43,13 @@ create function auth.uid() returns uuid language sql stable as
 $$ select nullif(nullif(current_setting('request.jwt.claims', true), '')::json ->> 'sub', '')::uuid $$;
 create function auth.role() returns text language sql stable as
 $$ select nullif(current_setting('request.jwt.claims', true), '')::json ->> 'role' $$;
+-- the verified claims as Supabase exposes them (auth_role() reads the 'aal' claim from here, 0030)
+create function auth.jwt() returns jsonb language sql stable as
+$$ select nullif(current_setting('request.jwt.claims', true), '')::jsonb $$;
 
 grant usage on schema public, auth to anon, authenticated, service_role;
 grant select on auth.users to service_role;
-grant execute on function auth.uid(), auth.role() to anon, authenticated, service_role;
+grant execute on function auth.uid(), auth.role(), auth.jwt() to anon, authenticated, service_role;
 
 -- Supabase grants everything in public to these roles by default; RLS and explicit revokes do the restricting.
 alter default privileges in schema public grant all on tables to anon, authenticated, service_role;

@@ -332,7 +332,7 @@ it("claims_guard binds an untrusted custom role: no paid status, no amount chang
   await c.query("create role app_z login");
   await c.query("grant authenticated to app_z");
   await c.query("set local role app_z");
-  await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: psy, role: "authenticated" })]);
+  await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: psy, role: "authenticated", aal: "aal2" })]);
   try {
     await expect(c.query("update claims set status='paid' where id=$1", [claim])).rejects.toThrow(/invalid_claim_transition/);
     await expect(c.query("update claims set status='part_paid' where id=$1", [claim])).rejects.toThrow(/invalid_claim_transition/);

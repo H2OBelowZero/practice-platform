@@ -59,7 +59,8 @@ declare
   claim_b   constant uuid := 'f0000000-0000-4000-8000-000000000002';
   claim_ma  constant uuid := 'f0000000-0000-4000-8000-000000000003';
   note_b    constant uuid := '80000000-0000-4000-8000-000000000002';
-  claims_psy constant text := '{"sub":"a0000000-0000-4000-8000-000000000001","role":"authenticated"}';
+  -- the psychologist acts with a two-step (aal2) session: staff roles get no database role without it (0030)
+  claims_psy constant text := '{"sub":"a0000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}';
   claims_pa  constant text := '{"sub":"a0000000-0000-4000-8000-000000000011","role":"authenticated"}';
   claims_pb  constant text := '{"sub":"a0000000-0000-4000-8000-000000000012","role":"authenticated"}';
   d date; tpl uuid; r record; v_pw text;

@@ -22,10 +22,14 @@ export async function withClient<T>(fn: (c: Client) => Promise<T>) {
     return await fn(c);
   } finally { await raw("rollback"); await c.end(); }
 }
-/** run queries as an authenticated Supabase user inside a rolled-back transaction */
-export async function asUser<T>(c: Client, sub: string, fn: () => Promise<T>) {
+/**
+ * Run queries as an authenticated Supabase user inside a rolled-back transaction. The JWT carries `aal: 'aal2'` by default: staff roles only get their
+ * role from auth_role() with a two-step (aal2) session (0030), and the claim makes no difference for patients and guardians. Pass `{ aal: "aal1" }` for a
+ * password-only session (what signInWithPassword with the anon key gives before the TOTP step).
+ */
+export async function asUser<T>(c: Client, sub: string, fn: () => Promise<T>, opts: { aal?: "aal1" | "aal2" } = {}) {
   await c.query("set local role authenticated");
-  await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub, role: "authenticated" })]);
+  await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub, role: "authenticated", aal: opts.aal ?? "aal2" })]);
   try { return await fn(); } finally {
     await c.query("reset role");
     await c.query("select set_config('request.jwt.claims', '', true)"); // no stale auth.uid() for later superuser queries
