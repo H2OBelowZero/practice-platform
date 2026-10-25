@@ -90,7 +90,7 @@ Each item: **Decision**, why, and what it costs or limits.
 
 ### Operations
 
-- **The scheduled job runs every 15 minutes** (needs Vercel Pro; on the free plan it can only run daily, or you use an outside scheduler).
+- **The scheduled job runs every 15 minutes** on Vercel. Vercel's free (Hobby) plan allows scheduled jobs to run only once a day, so 15-minute reminders need Vercel Pro, or the job can be run daily, or an outside scheduler can call the same address every 15 minutes (README 6.9). Check Vercel's current plan limits before you rely on this.
 - **Staging first, and the demo data is kept away from the live project.** The demo data (`supabase/seed-demo.sql`) is fictional but creates accounts, including a psychologist, with a password printed in the README. It is not loaded by any automatic command; you must run it by hand, on a throwaway staging project only, after switching on an explicit opt-in setting. It also refuses to run unless the database is empty and unnamed. That last check is **not** enough on its own: a brand-new live project is empty and unnamed too, which is why the opt-in exists and why the rule is: never run it on the live project, and prove before go-live that no demo user exists (README section 8). *Cost:* a real clinic enters its own settings by hand.
 - **Automatic deletion is not built.** Retention periods are recorded for information; nothing is deleted until you confirm the periods.
 - **Backups and incident handling are procedures, not features:** README section 9.
@@ -126,7 +126,7 @@ Each item: **Decision**, why, and what it costs or limits.
 8. **Retention periods** per record type and any legal hold (nothing is deleted automatically).
 9. **Medical-aid routine:** which clearing house or channel you use, and who records outcomes; whether ICD-10 coding stays with the psychologist only.
 10. **Bank details text** shown to patients, and who may change it.
-11. **Plans:** Supabase Pro (backups, point-in-time recovery, session limits, custom email) and Vercel Pro (15-minute reminders). Session time limits to set.
+11. **Plans:** check your Supabase plan for the things you need before real data goes in: daily backups and point-in-time recovery, and the session time-box and inactivity timeout (these depend on the plan; the free tier is for testing only). Sending your own sign-up and password-reset email through your email provider (custom SMTP) is available in Supabase's settings and is not what the plan decision hinges on; the built-in sender is rate-limited, so use your own provider. For Vercel, decide between Pro (15-minute reminders) and an outside scheduler. Set the session time limits you choose.
 12. **PayFast:** live account, passphrase, and the decision to go live after a clean sandbox test.
 13. **Backup and incident plan:** who runs the restore drill, how often, and the call list for an incident.
 14. **Whether the receptionist should see anything more or less** (for example the health-history form is hidden from them today).

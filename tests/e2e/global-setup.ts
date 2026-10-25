@@ -67,6 +67,8 @@ export default async function globalSetup(config: FullConfig) {
     const source = await raiseUnreconciled(SEED.invoice.selfPartPaid, 55000, 55000, "amount_mismatch");
     set("E2E_UNRECONCILED_TASK_ID", (must(await svc().from("tasks").select("id").eq("source", source).single(), "unreconciled task") as { id: string }).id);
   } catch (e) {
+    // with E2E_REQUIRE=1 a half-prepared project must not turn into a green run of skipped specs
+    if (process.env.E2E_REQUIRE === "1") throw new Error(`global setup: preparing the rows for the older specs failed and E2E_REQUIRE=1: ${(e as Error).message}`);
     console.warn(`global setup: could not prepare every row for the older specs (${(e as Error).message}); the specs that need them will skip.`);
   }
 }

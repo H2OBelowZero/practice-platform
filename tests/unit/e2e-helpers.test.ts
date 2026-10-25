@@ -3,6 +3,7 @@ import { base32Decode, hotp, totp, secondsLeft } from "../e2e/helpers/totp";
 import { itnBody, signItn } from "../e2e/helpers/itn";
 import { payfastSignature } from "@/lib/payments/payfast";
 import { e2eReady, missingE2E, ROLES, SEED } from "../e2e/helpers/roles";
+import { classify, expectBlocked } from "../e2e/helpers/api";
 
 // The e2e helpers cannot run here (no Supabase), but their pure parts can be checked: the TOTP code generator against the
 // RFC 6238 test vectors, the PayFast signature copy against the app's own, and the role table against the seed.
@@ -68,5 +69,17 @@ describe("e2e role table", () => {
       process.env.E2E_SUPABASE_URL = "http://x"; process.env.E2E_SUPABASE_ANON_KEY = "a"; process.env.E2E_SUPABASE_SERVICE_KEY = "s";
       expect(e2eReady()).toBe(true);
     } finally { process.env = saved; }
+  });
+});
+
+describe("direct-API result classification (the isolation checks must not mistake an error for 'no rows')", () => {
+  it("an empty result and a permission error are blocked; rows and every other error are not", () => {
+    expect(classify({ data: [], error: null })).toEqual({ kind: "rows", n: 0 });
+    expect(() => expectBlocked({ data: [], error: null }, "empty")).not.toThrow();
+    expect(() => expectBlocked({ data: null, error: { code: "42501", message: "permission denied for table claims" } }, "denied")).not.toThrow();
+    expect(() => expectBlocked({ data: null, error: { message: "permission denied for function audit_append" } }, "denied by text")).not.toThrow();
+    expect(() => expectBlocked({ data: [{ id: 1 }], error: null }, "a visible row")).toThrow(/1 row/);
+    for (const [code, message] of [["42P01", "relation \"patientz\" does not exist"], ["PGRST205", "Could not find the table 'public.patientz'"], ["42703", "column patients.idd does not exist"], ["PGRST100", "failed to parse"], ["", "fetch failed"]])
+      expect(() => expectBlocked({ data: null, error: { code, message } }, "typo"), message).toThrow(/error:/);
   });
 });

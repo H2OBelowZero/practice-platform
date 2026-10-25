@@ -239,7 +239,8 @@ describe("claim_outbox / finish_outbox", () => {
 });
 
 // SKIP LOCKED needs two real, concurrent transactions. The usual harness is a single rolled-back transaction, so this one test uses three plain
-// connections and COMMITS its three rows, then deletes them in `finally` (test files run one after the other, so nothing else sees them).
+// connections and COMMITS its three rows, then deletes them in `finally`. Nothing else sees them because the db project runs ONE test file at a time (vitest.config.ts: fileParallelism false, maxWorkers 1; the
+// npm script also passes --no-file-parallelism). If a run is killed mid-test the rows stay in that throwaway database, which is discarded with it.
 it("SKIP LOCKED: a claim made while another claim is still open skips the rows it holds (two overlapping cron runs never get the same row)", async () => {
   const url = process.env.DATABASE_URL_TEST;
   const [setup, a, b] = [new Client({ connectionString: url }), new Client({ connectionString: url }), new Client({ connectionString: url })];

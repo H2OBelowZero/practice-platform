@@ -14,6 +14,7 @@ const configToml = readFileSync(join(root, "config.toml"), "utf8");
 const block = demo.slice(demo.indexOf("-- BEGIN demo data"), demo.indexOf("-- END demo data"));
 const U = { psy: "a0000000-0000-4000-8000-000000000001", adm: "a0000000-0000-4000-8000-000000000002", bk: "a0000000-0000-4000-8000-000000000003",
   ua: "a0000000-0000-4000-8000-000000000011", ub: "a0000000-0000-4000-8000-000000000012", ug: "a0000000-0000-4000-8000-000000000021" };
+const AUDITED = 11; // invoice.issue x4, payment.record x2 (EFT + remittance), consent.grant x4, appointment.cancel x1
 const PA = "b0000000-0000-4000-8000-000000000011", PB = "b0000000-0000-4000-8000-000000000012", PM = "b0000000-0000-4000-8000-000000000014";
 
 async function run(c: Client, o: { optIn?: boolean; templates?: boolean } = {}): Promise<string[]> {
@@ -110,20 +111,34 @@ it("creates the practice setup, patients, guardianship, appointments, forms, bil
   expect(await one(c, "select method, reference, recorded_by from payments where invoice_id = 'c0000000-0000-4000-8000-000000000001'")).toEqual({ method: "eft", reference: "DEMO-EFT-0001", recorded_by: U.psy });
   // split invoice with a submitted claim: the invoice stays issued, the claim is submitted
   expect(await one(c, "select status, scheme_portion_cents, patient_portion_cents from invoices where patient_id = $1 and payer_type = 'split'", [PB])).toEqual({ status: "issued", scheme_portion_cents: 76000, patient_portion_cents: 19000 });
-  // a pure medical-aid invoice: the scheme owes everything, the patient nothing
-  expect(await one(c, "select status, scheme_portion_cents, patient_portion_cents, appointment_id from invoices where payer_type = 'medical_aid'")).toEqual({ status: "issued", scheme_portion_cents: 95000, patient_portion_cents: 0, appointment_id: null });
-  const claim = await one(c, "select status, claimed_cents, icd10_codes, submitted_at is not null as stamped from claims");
+  const claim = await one(c, "select status, claimed_cents, icd10_codes, submitted_at is not null as stamped from claims where id = 'f0000000-0000-4000-8000-000000000002'");
   expect(claim).toEqual({ status: "submitted", claimed_cents: 76000, icd10_codes: ["F41.1"], stamped: true });
-  expect((await one(c, "select count(*)::int n from claim_events where to_status = 'submitted'")).n).toBe(1);
+  // a pure medical-aid invoice (scheme owes everything, patient nothing) with its own claim and a partial scheme remittance
+  expect(await one(c, "select status, scheme_portion_cents, patient_portion_cents, appointment_id from invoices where payer_type = 'medical_aid'")).toEqual({ status: "part_paid", scheme_portion_cents: 95000, patient_portion_cents: 0, appointment_id: null });
+  expect(await one(c, "select status, claimed_cents from claims where id = 'f0000000-0000-4000-8000-000000000003'")).toEqual({ status: "part_paid", claimed_cents: 95000 });
+  expect(await one(c, "select amount_cents, remittance_ref from claim_payments where claim_id = 'f0000000-0000-4000-8000-000000000003'")).toEqual({ amount_cents: 30000, remittance_ref: "DEMO-RA-0001" });
+  expect(await one(c, "select method, amount_cents from payments where invoice_id = 'c0000000-0000-4000-8000-000000000004'")).toEqual({ method: "medical_aid", amount_cents: 30000 });
+  expect((await one(c, "select count(*)::int n from claim_events where claim_id = 'f0000000-0000-4000-8000-000000000003'")).n).toBeGreaterThanOrEqual(2);
+  expect((await one(c, "select count(*)::int n from claim_events where to_status = 'submitted'")).n).toBe(2);
   expect(await one(c, "select status from invoices where patient_id = $1", [PM])).toEqual({ status: "issued" });
-  // note: a draft with fictional text, never signed
-  const note = await one(c, "select state, signed_at, author_id, content ->> 'subjective' as s from clinical_notes");
+  // patient B has real rows of every kind the isolation tests claim another patient cannot read
+  expect((await one(c, "select count(*)::int n from consents where patient_id = $1 and granted", [PB])).n).toBe(2);
+  expect((await one(c, "select count(*)::int n from form_submissions where patient_id = $1 and status = 'submitted' and submitted_by = $2", [PB, U.ub])).n).toBe(2);
+  expect((await one(c, "select count(*)::int n from form_submission_versions v join form_submissions s on s.id = v.submission_id where s.patient_id = $1", [PB])).n).toBe(2);
+  expect((await one(c, "select count(*)::int n from audit_log where action = 'patient.view' and entity_id = $1", [PB])).n).toBe(1);
+  expect((await one(c, "select count(*)::int n from notifications_outbox where recipient = 'patient.b@demo.test' and status = 'sent'")).n).toBe(1);
+  // notes: A's is a draft with fictional text; B's is signed, then amended by an addendum, with a risk flag and its psychologist-only task
+  const note = await one(c, "select state, signed_at, author_id, content ->> 'subjective' as s from clinical_notes where id = '80000000-0000-4000-8000-000000000001'");
   expect(note.state).toBe("draft"); expect(note.signed_at).toBeNull(); expect(note.author_id).toBe(U.psy); expect(note.s).toMatch(/DEMO TEXT, FICTIONAL/);
+  const noteB = await one(c, "select state, signed_at is not null as signed, author_id, risk ->> 'level' as level, (select count(*)::int from note_addenda a where a.note_id = n.id) as addenda, (select count(*)::int from note_versions v where v.note_id = n.id) as versions from clinical_notes n where id = '80000000-0000-4000-8000-000000000002'");
+  expect(noteB).toMatchObject({ state: "amended", signed: true, author_id: U.psy, level: "moderate", addenda: 1 });
+  expect(noteB.versions).toBeGreaterThanOrEqual(1);
+  expect(await one(c, "select status, assignee, patient_id from tasks where source = 'risk_flag:80000000-0000-4000-8000-000000000002'")).toEqual({ status: "open", assignee: U.psy, patient_id: PB });
   // retention defaults come from the migration, not from the seed
   expect((await one(c, "select count(*)::int n from retention_policies")).n).toBe(5);
   // every invoice number is distinct and the audit trail was written by the real paths
   expect((await one(c, "select count(distinct number)::int n from invoices")).n).toBe(4);
-  expect((await one(c, "select count(*)::int n from audit_log where action in ('invoice.issue','payment.record','consent.grant','appointment.cancel')")).n).toBe(8);
+  expect((await one(c, "select count(*)::int n from audit_log where action in ('invoice.issue','payment.record','consent.grant','appointment.cancel')")).n).toBe(AUDITED);
   // the seed leaves no impersonation behind
   expect((await one(c, "select auth.uid() as u")).u).toBeNull();
 }));
@@ -163,10 +178,14 @@ it("a seeded patient sees only their own data; the guardian sees the child; staf
     expect((await c.query("select 1 from claims")).rowCount).toBe(0);
     expect((await c.query("select 1 from medical_aid_members")).rowCount).toBe(0);
     expect((await c.query("select distinct patient_id from consents")).rows.map((r) => r.patient_id)).toEqual([PA]);
+    expect((await c.query("select distinct patient_id from form_submissions")).rows.map((r) => r.patient_id)).toEqual([PA]);
   });
   await asUser(c, U.ub, async () => {
     expect((await c.query("select distinct patient_id from invoices")).rows.map((r) => r.patient_id)).toEqual([PB]);
     expect((await c.query("select 1 from medical_aid_members")).rowCount).toBe(1);
+    expect((await c.query("select 1 from payments")).rowCount).toBe(1); // B's own remittance payment
+    expect((await c.query("select 1 from consents")).rowCount).toBe(2);
+    expect((await c.query("select 1 from clinical_notes")).rowCount).toBe(0); // the patient never reads the clinical record
   });
   await asUser(c, U.ug, async () => {
     expect((await c.query("select id from patients")).rows.map((r) => r.id)).toEqual([PM]);
@@ -178,39 +197,120 @@ it("a seeded patient sees only their own data; the guardian sees the child; staf
     expect((await c.query("select 1 from invoices")).rowCount).toBe(4);
     expect((await c.query("select 1 from claims")).rowCount).toBe(0);
   });
-  await asUser(c, U.psy, async () => { expect((await c.query("select 1 from clinical_notes")).rowCount).toBe(1); });
+  await asUser(c, U.psy, async () => { expect((await c.query("select 1 from clinical_notes")).rowCount).toBe(2); });
 }));
 
-// The same direct-API isolation checks as tests/e2e/access.spec.ts ("direct API requests"), at SQL level as the `authenticated` / `anon` roles, so the
-// e2e expectations are known to hold in the schema before the first staging run.
-it("direct-API isolation: patient A, admin, bookkeeper and anonymous callers against the seeded data", () => withClient(async (c) => {
+// ---- direct-API isolation ------------------------------------------------------------------------------------------------------------------
+// The same checks as tests/e2e/access.spec.ts ("direct API requests"), at SQL level as the `authenticated` / `anon` roles, so the e2e expectations are
+// known to hold in the schema before the first staging run. Every "cannot read" check has a POSITIVE CONTROL: the identical query, run without
+// restriction (or as the psychologist where the table is hidden from the owner by design), must find at least one row of patient B's. Only an
+// empty result or a permission-denied error counts as "blocked"; any other error (a misspelt table or column) fails the test.
+const INV_SPLIT = "c0000000-0000-4000-8000-000000000002", INV_MA = "c0000000-0000-4000-8000-000000000004";
+const NOTE_B = "80000000-0000-4000-8000-000000000002", CLAIM_MA = "f0000000-0000-4000-8000-000000000003", MEM_B = "f0000000-0000-4000-8000-000000000001";
+const B_ROWS: Record<string, string> = {
+  patients: `select 1 from patients where id = '${PB}'`,
+  appointments: `select 1 from appointments where patient_id = '${PB}'`,
+  invoices: `select 1 from invoices where patient_id = '${PB}'`,
+  invoice_lines: `select 1 from invoice_lines where invoice_id = '${INV_SPLIT}'`,
+  payments: `select 1 from payments where invoice_id = '${INV_MA}'`,
+  form_submissions: `select 1 from form_submissions where patient_id = '${PB}'`,
+  consents: `select 1 from consents where patient_id = '${PB}'`,
+  medical_aid_members: `select 1 from medical_aid_members where id = '${MEM_B}'`,
+  clinical_notes: `select 1 from clinical_notes where patient_id = '${PB}'`,
+  note_versions: `select 1 from note_versions where note_id = '${NOTE_B}'`,
+  note_addenda: `select 1 from note_addenda where note_id = '${NOTE_B}'`,
+  claims: `select 1 from claims where member_id = '${MEM_B}'`,
+  claim_events: `select 1 from claim_events where claim_id = '${CLAIM_MA}'`,
+  claim_payments: `select 1 from claim_payments where claim_id = '${CLAIM_MA}'`,
+  claim_summary: `select 1 from claim_summary where invoice_id = '${INV_MA}'`,
+  audit_log: `select 1 from audit_log where entity_id = '${PB}'`,
+  tasks: `select 1 from tasks where patient_id = '${PB}'`,
+  risk_tasks: `select 1 from tasks where source like 'risk_flag:%'`,
+  notifications_outbox: `select 1 from notifications_outbox where recipient = 'patient.b@demo.test'`,
+  retention_policies: `select 1 from retention_policies`,
+};
+/** rows seen, or "denied" for a permission error; anything else (missing table or column, syntax) is a failed test */
+async function seen(c: Client, sql: string): Promise<number | "denied"> {
+  try { return (await c.query(sql)).rowCount ?? 0; }
+  catch (e) { if (/permission denied/i.test((e as Error).message)) return "denied"; throw e; }
+}
+async function blocked(c: Client, who: string, names: string[]) {
+  for (const n of names) expect([0, "denied"], `${who} reading ${n}`).toContain(await seen(c, B_ROWS[n]));
+}
+async function controls(c: Client, names: string[]) { // as the owner, or as the psychologist for the view that is empty without a role
+  for (const n of names) {
+    const got = n === "claim_summary" || n === "risk_tasks" ? await asUser(c, U.psy, () => seen(c, B_ROWS[n])) : await seen(c, B_ROWS[n]);
+    expect(got, `positive control for ${n}`).not.toBe("denied");
+    expect(got as number, `positive control for ${n}`).toBeGreaterThanOrEqual(1);
+  }
+}
+const ALL = Object.keys(B_ROWS);
+const PATIENT_TABLES = ["patients", "appointments", "invoices", "invoice_lines", "payments", "form_submissions", "consents", "medical_aid_members"];
+
+it("the blocked-check helper fails on a misspelt table or column (an error is not 'no rows')", () => withClient(async (c) => {
   await run(c);
-  const err = async (sql: string, p: unknown[] = []) => { try { await c.query(sql, p); return ""; } catch (e) { return (e as Error).message; } };
-  const rows = async (sql: string) => { try { return (await c.query(sql)).rowCount ?? 0; } catch { return 0; } }; // a permission error counts as no rows
+  await expect(seen(c, "select 1 from patientz")).rejects.toThrow(/does not exist/);
+  await expect(seen(c, "select 1 from patients where idd = 1")).rejects.toThrow(/does not exist/);
+  expect(await seen(c, `select 1 from patients where id = '${PB}'`)).toBe(1);
+}));
+
+it("every table the isolation checks cover really holds rows of patient B (so 'blocked' is meaningful)", () => withClient(async (c) => {
+  await run(c);
+  await controls(c, ALL);
+}));
+
+it("direct-API isolation: patient A cannot read patient B's rows, anywhere", () => withClient(async (c) => {
+  await run(c);
+  await controls(c, ALL);
   await asUser(c, U.ua, async () => {
-    for (const q of [`select 1 from patients where id = '${PB}'`, `select 1 from appointments where patient_id = '${PB}'`, `select 1 from invoices where patient_id = '${PB}'`,
-      `select 1 from payments where invoice_id = 'c0000000-0000-4000-8000-000000000002'`, `select 1 from form_submissions where patient_id = '${PB}'`, `select 1 from consents where patient_id = '${PB}'`,
-      "select 1 from clinical_notes", "select 1 from note_versions", "select 1 from note_addenda", "select 1 from claims", "select 1 from claim_summary", "select 1 from audit_log",
-      "select 1 from tasks", "select 1 from notifications_outbox", "select 1 from retention_policies"]) expect(await rows(q), q).toBe(0);
+    await blocked(c, "patient A", ALL);
+    const err = async (sql: string, p: unknown[] = []) => { try { await c.query(sql, p); return ""; } catch (e) { return (e as Error).message; } };
     expect(await err("select book_appointment($1, 'd0000000-0000-4000-8000-000000000002', now() + interval '2 days')", [PB])).toMatch(/forbidden/);
-    expect(await err("select record_payment('c0000000-0000-4000-8000-000000000002', 'eft', 100, 'X', null)")).toMatch(/forbidden/);
-    expect(await err("select record_scheme_remittance('f0000000-0000-4000-8000-000000000002', 100, 'X')")).toMatch(/forbidden/);
+    expect(await err(`select record_payment('${INV_SPLIT}', 'eft', 100, 'X', null)`)).toMatch(/forbidden/);
+    expect(await err(`select record_scheme_remittance('${CLAIM_MA}', 100, 'X')`)).toMatch(/forbidden/);
     expect(await err("select cancel_appointment('e0000000-0000-4000-8000-000000000005', 'x', false)")).toMatch(/forbidden/);
     expect(await err("select audit_append(null, 'patient', 'forged', null, null, null)")).toMatch(/permission denied/);
     expect(await err("insert into audit_log(action) values ('forged')")).toMatch(/permission denied|row-level security/);
     expect((await c.query(`update patients set first_name = 'Hacked' where id = '${PB}'`)).rowCount).toBe(0);
     expect((await c.query(`delete from appointments where patient_id = '${PB}'`).catch(() => ({ rowCount: 0 }))).rowCount).toBe(0);
   });
-  await asUser(c, U.adm, async () => {
-    for (const t of ["clinical_notes", "note_versions", "note_addenda"]) expect(await rows(`select 1 from ${t}`), t).toBe(0);
-  });
+  // B's rows are untouched afterwards
+  expect((await one(c, `select first_name from patients where id = '${PB}'`)).first_name).toBe("Pieter");
+  expect((await one(c, `select count(*)::int n from appointments where patient_id = '${PB}'`)).n).toBeGreaterThanOrEqual(2);
+}));
+
+it("direct-API isolation: patient B, the guardian and patient A are each limited to their own rows (positive both ways)", () => withClient(async (c) => {
+  await run(c);
+  await asUser(c, U.ub, async () => { for (const n of PATIENT_TABLES) expect(await seen(c, B_ROWS[n]), `B reading own ${n}`).toBeGreaterThanOrEqual(1); });
+  await asUser(c, U.ug, async () => { await blocked(c, "guardian of Sipho", PATIENT_TABLES); }); // B's rows, not the child's
+}));
+
+it("direct-API isolation: the admin reads no clinical data; the psychologist does (control)", () => withClient(async (c) => {
+  await run(c);
+  await controls(c, ["clinical_notes", "note_versions", "note_addenda", "risk_tasks"]);
+  await asUser(c, U.adm, async () => { await blocked(c, "admin", ["clinical_notes", "note_versions", "note_addenda", "risk_tasks"]); });
+}));
+
+it("direct-API isolation: the bookkeeper reads no clinical or patient data and cannot record payments", () => withClient(async (c) => {
+  await run(c);
+  const names = ["clinical_notes", "note_versions", "note_addenda", "patients", "form_submissions", "consents", "medical_aid_members", "claims", "claim_events", "audit_log", "tasks", "risk_tasks", "notifications_outbox", "retention_policies"];
+  await controls(c, names);
   await asUser(c, U.bk, async () => {
-    for (const t of ["clinical_notes", "note_versions", "note_addenda", "patients", "form_submissions", "consents", "medical_aid_members", "claims", "audit_log", "tasks"]) expect(await rows(`select 1 from ${t}`), t).toBe(0);
-    expect(await rows("select 1 from invoice_balances")).toBeGreaterThan(0);
-    expect(await err("select record_payment('c0000000-0000-4000-8000-000000000002', 'eft', 100, 'X', null)")).toMatch(/forbidden/);
+    await blocked(c, "bookkeeper", names);
+    expect(await seen(c, "select 1 from invoice_balances")).toBeGreaterThan(0); // what the bookkeeper may read is there
+    expect(await seen(c, B_ROWS.claim_payments)).toBeGreaterThan(0); // remittance amounts are readable by design (no names, no codes)
+    expect(await seen(c, `select 1 from claim_summary where invoice_id = '${INV_MA}'`)).toBeGreaterThan(0);
+    await expect(c.query(`select record_payment('${INV_SPLIT}', 'eft', 100, 'X', null)`)).rejects.toThrow(/forbidden/);
   });
+}));
+
+it("direct-API isolation: an anonymous caller reads nothing", () => withClient(async (c) => {
+  await run(c);
+  const names = ["patients", "appointments", "invoices", "payments", "clinical_notes", "form_submissions", "consents", "audit_log", "tasks"];
+  await controls(c, names);
   await c.query("set local role anon");
-  for (const t of ["patients", "appointments", "invoices", "payments", "clinical_notes", "form_submissions", "consents", "audit_log", "tasks"]) expect(await rows(`select 1 from ${t}`), t).toBe(0);
-  expect(await err("select record_payment('c0000000-0000-4000-8000-000000000002', 'payfast', 100, 'PF-1', null)")).toMatch(/permission denied/);
-  await c.query("reset role");
+  try {
+    await blocked(c, "anon", names);
+    await expect(c.query(`select record_payment('${INV_SPLIT}', 'payfast', 100, 'PF-1', null)`)).rejects.toThrow(/permission denied/);
+  } finally { await c.query("reset role"); }
 }));

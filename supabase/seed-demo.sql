@@ -22,7 +22,7 @@
 --   3. practices.name is still the default 'My Practice';
 --   4. the form templates from supabase/seed.sql are already loaded.
 -- Guards 2 and 3 are NOT enough on their own: a brand-new production project satisfies both. Guard 1 is what protects it, together with the
--- instruction never to run this file there. Before go-live check that no demo user exists (README section 8, G12).
+-- instruction never to run this file there. Before go-live check that no demo user exists (README section 8, task O9).
 -- Fixed ids are used so the e2e suite (tests/e2e/helpers/roles.ts) can refer to the rows.
 -- Everything goes through the paths the app uses (draft -> issued invoices, record_payment, submit_form, cancel_appointment),
 -- acting as the psychologist / patient through the same request.jwt.claims setting PostgREST uses.
@@ -57,8 +57,11 @@ declare
   inv_ma    constant uuid := 'c0000000-0000-4000-8000-000000000004';
   mem_b     constant uuid := 'f0000000-0000-4000-8000-000000000001';
   claim_b   constant uuid := 'f0000000-0000-4000-8000-000000000002';
+  claim_ma  constant uuid := 'f0000000-0000-4000-8000-000000000003';
+  note_b    constant uuid := '80000000-0000-4000-8000-000000000002';
   claims_psy constant text := '{"sub":"a0000000-0000-4000-8000-000000000001","role":"authenticated"}';
   claims_pa  constant text := '{"sub":"a0000000-0000-4000-8000-000000000011","role":"authenticated"}';
+  claims_pb  constant text := '{"sub":"a0000000-0000-4000-8000-000000000012","role":"authenticated"}';
   d date; tpl uuid; r record; v_pw text;
 begin
   if coalesce(current_setting('app.demo_seed', true), '') <> 'on' then
@@ -170,6 +173,17 @@ begin
   insert into form_submissions(id, patient_id, template_id, answers, status)
   values ('90000000-0000-4000-8000-000000000002', pa, tpl, '{}', 'draft');
   perform submit_form('90000000-0000-4000-8000-000000000002', '{"read_notice":true}', array['privacy_notice']);
+  -- patient B too: the isolation tests need real rows of B's in every table they claim another patient cannot read
+  perform set_config('request.jwt.claims', claims_pb, true);
+  select id into tpl from form_templates where key = 'informed_consent' and version = 1;
+  insert into form_submissions(id, patient_id, template_id, answers, status)
+  values ('90000000-0000-4000-8000-000000000003', pb, tpl, '{}', 'draft');
+  perform submit_form('90000000-0000-4000-8000-000000000003',
+    '{"understood":true,"consent_treatment":true,"typed_name":"Pieter van der Merwe"}', array['treatment']);
+  select id into tpl from form_templates where key = 'privacy_notice' and version = 1;
+  insert into form_submissions(id, patient_id, template_id, answers, status)
+  values ('90000000-0000-4000-8000-000000000004', pb, tpl, '{}', 'draft');
+  perform submit_form('90000000-0000-4000-8000-000000000004', '{"read_notice":true}', array['privacy_notice']);
   perform set_config('request.jwt.claims', claims_psy, true);
 
   -- ---- invoices: always a draft first, lines, then issue --------------------------------------------------------------
@@ -199,6 +213,10 @@ begin
   values (inv_ma, pb, 'medical_aid', 95000, 95000, 95000, 0);
   insert into invoice_lines(invoice_id, description, quantity, unit_cents, position) values (inv_ma, 'Follow-up consultation (50 min), billed to the scheme', 1, 95000, 1);
   update invoices set status = 'issued' where id = inv_ma;
+  -- its own claim, submitted by hand, then a partial scheme remittance: gives claim_events, claim_payments and a medical_aid payment row
+  insert into claims(id, invoice_id, member_id, claimed_cents, icd10_codes) values (claim_ma, inv_ma, mem_b, 95000, '{F41.1}');
+  update claims set status = 'submitted', claim_ref = 'DEMO-CLAIM-0002' where id = claim_ma;
+  perform record_scheme_remittance(claim_ma, 30000, 'DEMO-RA-0001');
 
   -- ---- a clinical note draft for the attended appointment of patient A (obviously fictional text) ------------------------
   insert into clinical_notes(id, patient_id, appointment_id, template_id, content, author_id)
@@ -207,8 +225,22 @@ begin
          psy
     from note_templates t where t.name = 'SOAP';
 
+  -- patient B: a SIGNED clinical note with an addendum (written, signed and amended by the psychologist through the normal functions),
+  -- a moderate risk flag with its follow-up task (psychologist-only), a staff 'patient.view' audit entry and an already-sent notification
+  insert into clinical_notes(id, patient_id, appointment_id, template_id, content, risk, author_id)
+  select note_b, pb, ap_past_b, t.id,
+         '{"subjective":"DEMO TEXT, FICTIONAL. Patient reports a fictional busy month.","objective":"DEMO TEXT. Settled.","assessment":"DEMO TEXT. No real assessment was made.","plan":"DEMO TEXT. Fictional review in two weeks."}'::jsonb,
+         '{"level":"moderate","notes":"DEMO TEXT, FICTIONAL risk note."}'::jsonb, psy
+    from note_templates t where t.name = 'SOAP';
+  perform raise_risk_task(note_b, 'moderate', 'Clinical risk follow-up (demo)');
+  perform sign_note(note_b);
+  perform add_addendum(note_b, 'DEMO TEXT, FICTIONAL addendum: corrected the session length.');
+  perform audit_append(psy, 'psychologist', 'patient.view', 'patients', pb, jsonb_build_object('patient_id', pb));
+  insert into notifications_outbox(channel, template, recipient, payload, status, attempts, send_after, sent_at)
+  values ('email', 'booking_confirmed', 'patient.b@demo.test', '{"date":"demo","time":"demo","link":"/portal/appointments"}', 'sent', 1, now() - interval '1 day', now() - interval '1 day');
+
   perform set_config('request.jwt.claims', '', true);
-  raise notice 'demo seed loaded: 7 demo accounts (password in the header of this block), 4 patients, 7 appointments, 4 invoices, 1 claim';
+  raise notice 'demo seed loaded: 7 demo accounts (password in the header of this block), 4 patients, 7 appointments, 4 invoices, 2 claims, 2 notes';
 end
 $demo$;
 -- END demo data

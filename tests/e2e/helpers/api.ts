@@ -30,9 +30,30 @@ export function apiAs(role: RoleName): Promise<SupabaseClient> {
 /** The public anon key with no user. */
 export const apiAnon = () => make();
 
-type Res = { data: unknown; error: { message: string; code?: string } | null };
-/** Rows a caller may see through the API: none when RLS filters everything, and an error (permission denied) counts as none. */
+export type Res = { data: unknown; error: { message: string; code?: string } | null; status?: number };
+
+/** Rows a caller may see through the API (an error counts as none). Only for filtering lists; use classify / expectBlocked to ASSERT isolation. */
 export function visibleRows(res: Res): unknown[] {
   if (res.error) return [];
   return Array.isArray(res.data) ? res.data : res.data == null ? [] : [res.data];
+}
+
+export type Outcome = { kind: "rows"; n: number } | { kind: "denied" } | { kind: "error"; message: string };
+/**
+ * What a read really came to. "denied" is ONLY a permission error (SQLSTATE 42501, or the words "permission denied"); every other error
+ * (undefined table 42P01 / PGRST205, undefined column 42703, PostgREST or syntax errors) is kind "error": a typo must never pass as "no rows".
+ */
+export function classify(res: Res): Outcome {
+  if (res.error) {
+    const { code, message } = res.error;
+    return code === "42501" || /permission denied/i.test(message) ? { kind: "denied" } : { kind: "error", message: `${code ?? ""} ${message}`.trim() };
+  }
+  const n = Array.isArray(res.data) ? res.data.length : res.data == null ? 0 : 1;
+  return { kind: "rows", n };
+}
+/** Pass only for an RLS-empty result or a permission-denied error; anything else throws (including an unexpected error and any visible row). */
+export function expectBlocked(res: Res, what: string): void {
+  const o = classify(res);
+  if (o.kind === "denied" || (o.kind === "rows" && o.n === 0)) return;
+  throw new Error(`${what}: expected no rows or permission denied, got ${o.kind === "rows" ? o.n + " row(s)" : "error: " + o.message}`);
 }

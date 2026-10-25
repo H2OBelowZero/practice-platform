@@ -10,7 +10,10 @@ export default defineConfig({
     projects: [
       { resolve: { alias }, oxc: { jsx: { runtime: "automatic" } }, test: { name: "unit", include: ["tests/unit/**/*.test.{ts,tsx}"], setupFiles: ["dotenv/config"] } },
       // db tests need a throwaway Postgres; globalSetup is wired here only so test:unit never starts one
-      { resolve: { alias }, test: { name: "db", include: ["tests/db/**/*.test.ts"], globalSetup: ["tests/db/global-setup.ts"], setupFiles: ["dotenv/config"] } },
+      // All db test files share ONE throwaway PostgreSQL and a few of them COMMIT rows or rely on global state (sequences, advisory locks, the outbox), so
+      // they must never run side by side: one file at a time in one worker, whatever flags the caller passes. 30 s timeouts give a slow disk or a busy
+      // CI machine room beyond the 5 s default.
+      { resolve: { alias }, test: { name: "db", include: ["tests/db/**/*.test.ts"], globalSetup: ["tests/db/global-setup.ts"], setupFiles: ["dotenv/config"], fileParallelism: false, maxWorkers: 1, testTimeout: 30000, hookTimeout: 30000 } },
     ],
   },
 });
