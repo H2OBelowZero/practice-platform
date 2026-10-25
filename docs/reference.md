@@ -42,7 +42,7 @@ allow-list, and set `APP_URL` to the site's public origin (used for password-res
   Providers > Email > "Confirm email", and turn on "Secure email change". `ensure_patient_record()` (0008) only attaches a
   staff-created patient record to a self-registered account when the account's email is confirmed, exactly one unlinked
   row has that address, and staff have invited that person to the portal (`patients.portal_invited_at`, set by the
-  "Invite to portal" action added in Task 11) and the row is not a minor or archived. With confirmation off, anyone could
+  "Invite to portal" action) and the row is not a minor or archived. With confirmation off, anyone could
   register someone else's address and read their record. Every other registration gets a new prospect row, and a
   "Possible duplicate patient: review and merge" task is raised when an email-matching row existed but could not be linked.
 - **Session limits**: at go-live set the Supabase session time-box and inactivity timeout (Authentication > Sessions;
@@ -54,9 +54,9 @@ allow-list, and set `APP_URL` to the site's public origin (used for password-res
   `/app` and `/portal` page, server action and route handler must itself call `requireRole` / `requireUser`
   (`lib/auth/session.ts`), which also sends staff without aal2 to `/mfa` and back to the page they wanted.
 
-Caveat (R14): the DB tests stub the `auth` schema, and there is no Supabase project in CI, so the Supabase Auth flows
+Caveat: the DB tests stub the `auth` schema, and there is no Supabase project in CI, so the Supabase Auth flows
 (sign-in, MFA enrolment and verification, email confirmation and recovery links, the signup trigger on the real
-`auth.users`) are only verified after deploying to a real Supabase project (see the e2e specs in Task 18).
+`auth.users`) are only verified after deploying to a real Supabase project (see the first staging run checklist in the README).
 
 ## Payments: PayFast
 
@@ -74,7 +74,7 @@ Environment variables (`.env.example`):
 | `APP_URL` | Public origin; the notify URL is `${APP_URL}/api/payfast/itn`. |
 | `SUPABASE_SERVICE_ROLE_KEY` | The ITN runs as the service role (`record_payment` accepts the `payfast` method only from a `service_role` JWT). |
 
-What the ITN does, in order (R36): body <= 10 KB -> MD5 signature (constant-time, PHP `urlencode` rules, every posted field in
+What the ITN does, in order: body <= 10 KB -> MD5 signature (constant-time, PHP `urlencode` rules, every posted field in
 received order) -> source IP in a PayFast range -> `merchant_id` -> `m_payment_id` is an invoice UUID that exists -> replay
 (`PF-<pf_payment_id>` already recorded for this invoice and amount: answer 200 without calling PayFast) -> `payment_status`
 COMPLETE only -> `amount_gross` equals the invoice's outstanding balance (to the cent, parsed from the string) -> PayFast
@@ -87,8 +87,8 @@ outstanding balance; part payments come from manual and medical-aid recording.
 ### The patient / guardian Payments pages (`/portal/payments`)
 
 Patients and guardians (a guardian needs `permissions.pay`) see their issued invoices, what is outstanding, payments and receipts, all read with
-their own session so row-level security decides what arrives. "Pay now" is offered per invoice by `payNowAllowed()` (`lib/billing/pay-now.ts`,
-R40): self-pay invoices always; medical aid / split invoices only once the medical aid side is settled (scheme remittances plus credit notes
+their own session so row-level security decides what arrives. "Pay now" is offered per invoice by `payNowAllowed()` (`lib/billing/pay-now.ts`
+): self-pay invoices always; medical aid / split invoices only once the medical aid side is settled (scheme remittances plus credit notes
 marked "medical aid shortfall" cover the scheme portion) and what is left is the patient's own part. The server action `startPayfastCheckout`
 re-reads everything through RLS, recomputes that verdict and the amount (the whole outstanding balance, never a number from the browser; the
 amount the page showed is only used to refuse a stale click), builds the signed form with the signed-in user's own name and email, and the page
@@ -197,14 +197,14 @@ Not verified without a live setup: a real provider call, the Vercel schedule its
 - `/app/audit` (psychologist only): filters, 50 per page, whitelisted detail (`lib/audit-viewer/detail.ts`), CSV at `/app/audit/export` (max 5000 rows, formulas
   neutralised by `lib/reports/csv.ts`; sent with `nosniff`). The control is a plain `<a download>` (never a next/link, which would prefetch and run the export; a prefetch/RSC request gets an empty 204). Viewing writes `audit.view` and exporting writes `export.audit`; both fail closed. A 5 000 row export is read with keyset paging in chunks of
   1 000 because the API caps a response.
-- Reports and Settings are hidden in the navigation until Task 16b adds their pages (`ready: false` in `lib/nav.ts`).
+- Reports and Settings are hidden in the navigation until their pages exist (`ready: false` in `lib/nav.ts`; the flag is now cleared).
 
-## Security hardening (Task 17a)
+## Security hardening
 
 - **Content-Security-Policy** is built per request in `middleware.ts` from `lib/security/csp.ts` (nonce + `strict-dynamic`; no `unsafe-inline`/`unsafe-eval` for scripts in production, `unsafe-eval` in `next dev` only). Every page therefore renders dynamically (`export const dynamic = "force-dynamic"` in `app/layout.tsx`): a prerendered page cannot carry a per-request nonce. `style-src` keeps `'unsafe-inline'` (Next and React emit inline styles; they cannot run script). `connect-src` allows only the Supabase project in `NEXT_PUBLIC_SUPABASE_URL` (the browser does not call Supabase today; server actions do the talking). It fails closed: if `NEXT_PUBLIC_SUPABASE_URL` is missing or invalid in production, `buildCsp` throws and the middleware answers 500 with a fixed text instead of serving anything without a CSP (development falls back to `http://localhost:54321`; there is no wildcard fallback). The middleware matcher still skips `/api/payfast`, `/api/cron`, `_next/static` and image files, which carry no CSP.
 - **PayFast and `form-action`**: checkout is a real `<form method="post">` to `https://www.payfast.co.za` (sandbox: `sandbox.payfast.co.za`). Chrome also applies `form-action` to redirects after the POST, so both PayFast hosts are listed. If PayFast ever redirects through another host the browser blocks it with a console message "violates form-action". Not verified until the first sandbox payment on staging.
-- **Static headers** (`next.config.ts` via `lib/security/headers.ts`, all routes): HSTS (2 years, includeSubDomains, no preload), nosniff, `Referrer-Policy: strict-origin-when-cross-origin` (not `same-origin`: that sends no Referer and a `null` Origin on the cross-origin PayFast checkout POST; this sends only our origin, never a path or query, and nothing on a downgrade), a Permissions-Policy that turns off camera, microphone, geolocation and payment (telehealth in Phase 2 will need to relax this for the video page), `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin`. `Cache-Control: no-store, max-age=0` plus `Pragma: no-cache` on everything signed-in or token-bearing: `/app`, `/portal`, `/api`, `/login`, `/mfa`, `/recover`, `/auth`, `/book/confirmed` (R35). `Vary` is deliberately not added: with no-store nothing is cached, so there is nothing to vary. A unit test fails if a new top-level route folder is not listed or deliberately public.
-- **TRUNCATE (R20)**: migration `0029_truncate_hardening.sql` revokes TRUNCATE, TRIGGER and REFERENCES (and MAINTAIN on PostgreSQL 17+) from `anon`, `authenticated` and `service_role` on every public table and in the schema's default privileges. `tests/db/truncate-hardening.test.ts` finds tables from `pg_class`, so a table added later is checked automatically. **After applying migrations to the hosted project run once** (the default-privilege part depends on how Supabase set up the `postgres` role, which the local test database only mimics) and expect zero rows:
+- **Static headers** (`next.config.ts` via `lib/security/headers.ts`, all routes): HSTS (2 years, includeSubDomains, no preload), nosniff, `Referrer-Policy: strict-origin-when-cross-origin` (not `same-origin`: that sends no Referer and a `null` Origin on the cross-origin PayFast checkout POST; this sends only our origin, never a path or query, and nothing on a downgrade), a Permissions-Policy that turns off camera, microphone, geolocation and payment (telehealth in Phase 2 will need to relax this for the video page), `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin`. `Cache-Control: no-store, max-age=0` plus `Pragma: no-cache` on everything signed-in or token-bearing: `/app`, `/portal`, `/api`, `/login`, `/mfa`, `/recover`, `/auth`, `/book/confirmed`. `Vary` is deliberately not added: with no-store nothing is cached, so there is nothing to vary. A unit test fails if a new top-level route folder is not listed or deliberately public.
+- **Dangerous privileges (TRUNCATE)**: migration `0029_truncate_hardening.sql` revokes TRUNCATE, TRIGGER and REFERENCES (and MAINTAIN on PostgreSQL 17+) from `anon`, `authenticated` and `service_role` on every public table and in the schema's default privileges. `tests/db/truncate-hardening.test.ts` finds tables from `pg_class`, so a table added later is checked automatically. **After applying migrations to the hosted project run once** (the default-privilege part depends on how Supabase set up the `postgres` role, which the local test database only mimics) and expect zero rows:
 
   ```sql
   -- tables, views, materialized views and partitioned tables; expect zero rows

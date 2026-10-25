@@ -91,7 +91,7 @@ Each item: **Decision**, why, and what it costs or limits.
 ### Operations
 
 - **The scheduled job runs every 15 minutes** (needs Vercel Pro; on the free plan it can only run daily, or you use an outside scheduler).
-- **Staging first.** The demo data is fictional, uses a public password and loads only into an empty, unconfigured database, so loading it on the live project does nothing. *Cost:* a real clinic needs its own settings entered by hand.
+- **Staging first, and the demo data is kept away from the live project.** The demo data (`supabase/seed-demo.sql`) is fictional but creates accounts, including a psychologist, with a password printed in the README. It is not loaded by any automatic command; you must run it by hand, on a throwaway staging project only, after switching on an explicit opt-in setting. It also refuses to run unless the database is empty and unnamed. That last check is **not** enough on its own: a brand-new live project is empty and unnamed too, which is why the opt-in exists and why the rule is: never run it on the live project, and prove before go-live that no demo user exists (README section 8). *Cost:* a real clinic enters its own settings by hand.
 - **Automatic deletion is not built.** Retention periods are recorded for information; nothing is deleted until you confirm the periods.
 - **Backups and incident handling are procedures, not features:** README section 9.
 - **A weekly check** of tasks, audit log and system status is the main monitoring.
@@ -130,5 +130,8 @@ Each item: **Decision**, why, and what it costs or limits.
 12. **PayFast:** live account, passphrase, and the decision to go live after a clean sandbox test.
 13. **Backup and incident plan:** who runs the restore drill, how often, and the call list for an incident.
 14. **Whether the receptionist should see anything more or less** (for example the health-history form is hidden from them today).
-15. **A planned upgrade** to the next major version of the web framework, to clear the remaining known warnings; and PNG app icons if you want the site installable on phones.
-16. **Phase 2 priorities:** electronic claims, telehealth, messaging, refunds, SMS, multiple practitioners.
+15. **Email reminders are ON by default for every patient record** (a patient can switch them off in the portal). Reminders hold only a date, a time and a link, but they are still personal information sent by email to an address you hold: confirm that this default, and the wording of the consent and privacy notice, is acceptable under POPIA for your practice, or ask for it to default to off.
+16. **Archived patients keep their portal login.** Archiving a patient hides them from your lists but does not lock their account, so they can still see their own appointments, invoices and forms. Decide whether an archived patient should lose access (not built).
+17. **Portal invitations are throttled:** the same patient cannot be invited again within ten minutes, to stop accidental repeated emails. Confirm that is the right limit, and that you are happy for an existing record to be linked to a self-registered account only after you have invited that person (the link needs a confirmed email address).
+18. **A planned upgrade** to the next major version of the web framework, to clear the remaining known warnings; and PNG app icons if you want the site installable on phones.
+19. **Phase 2 priorities:** electronic claims, telehealth, messaging, refunds, SMS, multiple practitioners.
