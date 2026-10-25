@@ -22,18 +22,20 @@ function files(dir: string, ext = /\.(ts|tsx|mjs)$/): string[] {
 }
 const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
-/** process.env.X, process.env["X"], env.X (a parameter named env) and the string-argument helpers has("X") / required("X") */
+/** process.env.X, process.env["X"], destructuring from process.env, env.X (a parameter named env) and the string-argument helpers has("X") / required("X") */
 function envNames(src: string): string[] {
   const code = strip(src);
   const names = new Set<string>();
+  for (const m of code.matchAll(/\{([^}]*)\}\s*=\s*(?:process\.)?env\b/g))
+    for (const part of m[1].split(",")) { const n = part.trim().split(/[\s:=]/)[0]; if (/^[A-Z][A-Z0-9_]+$/.test(n)) names.add(n); }
   for (const re of [/process\.env\.([A-Z][A-Z0-9_]+)/g, /process\.env\[\s*["']([A-Z][A-Z0-9_]+)["']\s*\]/g, /\benv\.([A-Z][A-Z0-9_]+)/g, /\b(?:has|required)\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)/g])
     for (const m of code.matchAll(re)) names.add(m[1]);
   return [...names];
 }
 
 describe(".env.example", () => {
-  it("documents every variable the app code reads (app/, lib/, components/, middleware.ts, next.config.ts)", () => {
-    const sources = [...files(join(root, "app")), ...files(join(root, "lib")), ...files(join(root, "components")), join(root, "middleware.ts"), join(root, "next.config.ts")];
+  it("documents every variable the app code and scripts read (app/, lib/, components/, scripts/, middleware.ts, next.config.ts)", () => {
+    const sources = [...files(join(root, "app")), ...files(join(root, "lib")), ...files(join(root, "components")), ...files(join(root, "scripts")), join(root, "middleware.ts"), join(root, "next.config.ts")];
     const missing: string[] = [];
     const seen = new Set<string>();
     for (const f of sources) for (const n of envNames(readFileSync(f, "utf8"))) {
@@ -64,6 +66,7 @@ describe(".env.example", () => {
   it("the scanner finds a variable that is not documented (self-test)", () => {
     expect(envNames(`const a = process.env.MY_NEW_SECRET; const b = process.env["OTHER_ONE"]; if (env.THIRD_ONE) {}; required("FOURTH_ONE")`).sort())
       .toEqual(["FOURTH_ONE", "MY_NEW_SECRET", "OTHER_ONE", "THIRD_ONE"]);
+    expect(envNames("const { ALPHA, BETA: b, GAMMA = 'x', lower } = process.env; const { DELTA } = env;").sort()).toEqual(["ALPHA", "BETA", "DELTA", "GAMMA"]);
     expect(envNames(`// process.env.COMMENTED\n/* env.BLOCK */`)).toEqual([]);
   });
 });

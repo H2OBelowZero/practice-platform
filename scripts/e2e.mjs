@@ -8,7 +8,8 @@ const missing = need.filter((v) => !process.env[v]);
 if (missing.length) {
   console.log(
     `\nNo end-to-end environment (missing: ${missing.join(", ")}).\n` +
-    "The e2e specs need a running app and a Supabase project loaded with supabase/seed.sql; they will be SKIPPED, not run.\n" +
+    "The e2e specs need a running app and a THROWAWAY Supabase project loaded with supabase/seed.sql and supabase/seed-demo.sql; they will be SKIPPED, not run\n" +
+    "(set E2E_REQUIRE=1 to make a missing environment fail the run instead, for CI and staging gates).\n" +
     'See README, "Running the end-to-end tests" (staging project or local `supabase start`).\n',
   );
 }

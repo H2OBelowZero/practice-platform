@@ -6,8 +6,8 @@ import { e2eReady, SKIP_MESSAGE } from "./tests/e2e/helpers/roles";
 //   E2E_START_SERVER=1        start `npm run dev` for the run (otherwise start or deploy the app yourself)
 //   E2E_SUPABASE_URL / E2E_SUPABASE_ANON_KEY / E2E_SUPABASE_SERVICE_KEY   the project the app talks to
 //   E2E_PAYFAST_PASSPHRASE, E2E_PAYFAST_MERCHANT_ID   optional: enable the "signed notification from a non-PayFast address is refused" check
-// Without the Supabase variables global setup does not run and every spec that needs the project skips itself, so `npx playwright test`
-// passes (all skipped) on a machine with no project.
+// Without the Supabase variables global setup does nothing and every spec that needs the project skips itself, so `npx playwright test`
+// passes (all skipped) on a machine with no project. Set E2E_REQUIRE=1 (CI, staging gates) to make a missing environment FAIL the run instead.
 const ready = e2eReady();
 if (!ready && !process.env.TEST_WORKER_INDEX && !process.env.E2E_QUIET) console.warn(`\n${SKIP_MESSAGE()}\nSpecs that need it will be skipped.\n`);
 
@@ -22,7 +22,7 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 10_000 },
   reporter: [["list"], ["html", { open: "never" }]],
-  globalSetup: ready ? "./tests/e2e/global-setup.ts" : undefined,
+  globalSetup: "./tests/e2e/global-setup.ts", // does nothing without the E2E variables, or fails when E2E_REQUIRE=1
   use: { baseURL, trace: "on-first-retry", screenshot: "only-on-failure" },
   projects: [
     { name: "chromium-desktop", use: { ...devices["Desktop Chrome"] } },

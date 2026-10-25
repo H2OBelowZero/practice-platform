@@ -180,3 +180,37 @@ it("a seeded patient sees only their own data; the guardian sees the child; staf
   });
   await asUser(c, U.psy, async () => { expect((await c.query("select 1 from clinical_notes")).rowCount).toBe(1); });
 }));
+
+// The same direct-API isolation checks as tests/e2e/access.spec.ts ("direct API requests"), at SQL level as the `authenticated` / `anon` roles, so the
+// e2e expectations are known to hold in the schema before the first staging run.
+it("direct-API isolation: patient A, admin, bookkeeper and anonymous callers against the seeded data", () => withClient(async (c) => {
+  await run(c);
+  const err = async (sql: string, p: unknown[] = []) => { try { await c.query(sql, p); return ""; } catch (e) { return (e as Error).message; } };
+  const rows = async (sql: string) => { try { return (await c.query(sql)).rowCount ?? 0; } catch { return 0; } }; // a permission error counts as no rows
+  await asUser(c, U.ua, async () => {
+    for (const q of [`select 1 from patients where id = '${PB}'`, `select 1 from appointments where patient_id = '${PB}'`, `select 1 from invoices where patient_id = '${PB}'`,
+      `select 1 from payments where invoice_id = 'c0000000-0000-4000-8000-000000000002'`, `select 1 from form_submissions where patient_id = '${PB}'`, `select 1 from consents where patient_id = '${PB}'`,
+      "select 1 from clinical_notes", "select 1 from note_versions", "select 1 from note_addenda", "select 1 from claims", "select 1 from claim_summary", "select 1 from audit_log",
+      "select 1 from tasks", "select 1 from notifications_outbox", "select 1 from retention_policies"]) expect(await rows(q), q).toBe(0);
+    expect(await err("select book_appointment($1, 'd0000000-0000-4000-8000-000000000002', now() + interval '2 days')", [PB])).toMatch(/forbidden/);
+    expect(await err("select record_payment('c0000000-0000-4000-8000-000000000002', 'eft', 100, 'X', null)")).toMatch(/forbidden/);
+    expect(await err("select record_scheme_remittance('f0000000-0000-4000-8000-000000000002', 100, 'X')")).toMatch(/forbidden/);
+    expect(await err("select cancel_appointment('e0000000-0000-4000-8000-000000000005', 'x', false)")).toMatch(/forbidden/);
+    expect(await err("select audit_append(null, 'patient', 'forged', null, null, null)")).toMatch(/permission denied/);
+    expect(await err("insert into audit_log(action) values ('forged')")).toMatch(/permission denied|row-level security/);
+    expect((await c.query(`update patients set first_name = 'Hacked' where id = '${PB}'`)).rowCount).toBe(0);
+    expect((await c.query(`delete from appointments where patient_id = '${PB}'`).catch(() => ({ rowCount: 0 }))).rowCount).toBe(0);
+  });
+  await asUser(c, U.adm, async () => {
+    for (const t of ["clinical_notes", "note_versions", "note_addenda"]) expect(await rows(`select 1 from ${t}`), t).toBe(0);
+  });
+  await asUser(c, U.bk, async () => {
+    for (const t of ["clinical_notes", "note_versions", "note_addenda", "patients", "form_submissions", "consents", "medical_aid_members", "claims", "audit_log", "tasks"]) expect(await rows(`select 1 from ${t}`), t).toBe(0);
+    expect(await rows("select 1 from invoice_balances")).toBeGreaterThan(0);
+    expect(await err("select record_payment('c0000000-0000-4000-8000-000000000002', 'eft', 100, 'X', null)")).toMatch(/forbidden/);
+  });
+  await c.query("set local role anon");
+  for (const t of ["patients", "appointments", "invoices", "payments", "clinical_notes", "form_submissions", "consents", "audit_log", "tasks"]) expect(await rows(`select 1 from ${t}`), t).toBe(0);
+  expect(await err("select record_payment('c0000000-0000-4000-8000-000000000002', 'payfast', 100, 'PF-1', null)")).toMatch(/permission denied/);
+  await c.query("reset role");
+}));

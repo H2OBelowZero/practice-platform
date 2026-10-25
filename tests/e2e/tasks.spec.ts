@@ -59,7 +59,7 @@ test.describe("staff tasks", () => {
   });
 
   test.describe("an unmatched PayFast payment shows its figures", () => {
-    test.skip(!process.env.E2E_BASE_HAS_DATA, "needs the seeded unreconciled PayFast task"); // at describe level so no browser is started when the inputs are missing
+    test.skip(!process.env.E2E_UNRECONCILED_TASK_ID, "needs the unreconciled PayFast task that global setup raises"); // at describe level so no browser is started when the inputs are missing
     test("an unmatched PayFast payment shows its figures", async ({ page }) => {
       await page.goto("/app/tasks?group=billing");
       await expect(page.getByText("Payment received at PayFast that could not be matched").first()).toBeVisible();

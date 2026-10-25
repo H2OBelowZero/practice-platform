@@ -3,9 +3,12 @@ import { mkdirSync } from "node:fs";
 import { AUTH_DIR, e2eReady, ROLES, SEED, SKIP_MESSAGE, type RoleName } from "./helpers/roles";
 import { signInAs } from "./helpers/ui";
 import { attendedAppointment, bookSoon, issuedInvoice, must, paymentsOf, svc } from "./helpers/db";
+import { raiseUnreconciled } from "./helpers/itn";
 
 /**
- * Runs once before the suite, only when E2E_SUPABASE_URL / E2E_SUPABASE_ANON_KEY / E2E_SUPABASE_SERVICE_KEY are set.
+ * Runs once before the suite. Without E2E_SUPABASE_URL / E2E_SUPABASE_ANON_KEY / E2E_SUPABASE_SERVICE_KEY it does nothing (every spec then skips itself),
+ * unless E2E_REQUIRE=1, which makes the run FAIL instead (for CI and staging gates, where a silent skip would look like a pass).
+ *  0. Refuses to run unless the target project is the demo project (practice name "Demo Practice"): a safety stop against pointing the suite at production.
  *  1. Signs every seeded role in through the real /login (and /mfa for staff: enrols the authenticator the first time and keeps the secret in
  *     tests/e2e/.auth/totp-<role>.json) and stores a storageState per role in tests/e2e/.auth/<role>.json (gitignored).
  *  2. Prepares the few rows the older task-by-task specs expect (an appointment inside the cancellation window, an attended appointment
@@ -13,7 +16,15 @@ import { attendedAppointment, bookSoon, issuedInvoice, must, paymentsOf, svc } f
  *     variables those specs read. Everything else those specs need is in the seed (fixed ids, tests/e2e/helpers/roles.ts).
  */
 export default async function globalSetup(config: FullConfig) {
-  if (!e2eReady()) { console.warn(SKIP_MESSAGE()); return; }
+  if (!e2eReady()) {
+    if (process.env.E2E_REQUIRE === "1") throw new Error(`E2E_REQUIRE=1 but the end-to-end environment is incomplete. ${SKIP_MESSAGE()}`);
+    console.warn(SKIP_MESSAGE());
+    return;
+  }
+  const practice = must(await svc().from("practices").select("name").limit(1).single(), "read practice") as { name: string };
+  if (practice.name !== "Demo Practice") {
+    throw new Error(`global setup refused: the practice at E2E_SUPABASE_URL is named "${practice.name}", not "Demo Practice". The e2e suite signs in with public demo passwords and writes test rows: run it only against a throwaway project loaded with supabase/seed-demo.sql, never production.`);
+  }
   mkdirSync(AUTH_DIR, { recursive: true });
   const baseURL = String(config.projects[0]?.use?.baseURL ?? process.env.E2E_BASE_URL ?? "http://localhost:3000");
 
@@ -52,6 +63,9 @@ export default async function globalSetup(config: FullConfig) {
     if (!members?.length) must(await svc().from("medical_aid_members").insert({ patient_id: SEED.patient.a, scheme: "Demo Medical Scheme", plan: "Demo Plan", member_number: "DEMO-A-0001", dependant_code: "00", valid_from: "2024-01-01" }).select("id"), "member");
     set("E2E_SPLIT_INVOICE_ID", await issuedInvoice({ patientId: SEED.patient.a, payer: "split", totalCents: 95000, schemeCents: 76000 }));
     set("E2E_MA_INVOICE_ID", await issuedInvoice({ patientId: SEED.patient.a, payer: "medical_aid", totalCents: 95000, schemeCents: 95000 }));
+    // an unmatched PayFast payment for tasks.spec, raised exactly as the ITN route does (service client, same arguments), so that spec does not depend on workflow C
+    const source = await raiseUnreconciled(SEED.invoice.selfPartPaid, 55000, 55000, "amount_mismatch");
+    set("E2E_UNRECONCILED_TASK_ID", (must(await svc().from("tasks").select("id").eq("source", source).single(), "unreconciled task") as { id: string }).id);
   } catch (e) {
     console.warn(`global setup: could not prepare every row for the older specs (${(e as Error).message}); the specs that need them will skip.`);
   }
