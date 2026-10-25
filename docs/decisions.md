@@ -23,7 +23,7 @@ Each item: **Decision**, why, and what it costs or limits.
 
 - **Two locks on every door.** Access is controlled by the database itself and again by the website code on every page and action. *Why:* a mistake in one layer must not expose patient data. *Cost:* more code and tests; a new page that forgets its check fails a test.
 - **Staff accounts are created by you, never by sign-up.** The first staff account is made in the Supabase dashboard and promoted with one line of SQL; anyone who registers on the site is only ever a patient. *Why:* nobody can make themselves staff. *Cost:* a manual step per new staff member.
-- **Staff must use an authenticator app code.** *Why:* a stolen password alone is not enough. *Cost:* the person creating an account should be present for the first sign-in, because until the app is linked anyone with the password could link their own.
+- **Staff must use an authenticator app code, and the database itself checks it.** A staff password without the code opens nothing, not even by talking to the database directly with the public key. *Why:* a stolen password alone is not enough, and the website must not be the only lock. *Cost:* the person creating an account should be present for the first sign-in, because until the app is linked anyone with the password could link their own.
 - **"Confirm email" must be switched on.** A staff-created patient record is linked to a self-registered account only if the email is confirmed, the practice invited the person and exactly one record matches. *Why:* otherwise someone could register another person's address and read their file. *Cost:* if the setting is off, the safeguard fails; it is on the go-live checklist. Look-alike records raise a "possible duplicate" task instead of linking.
 - **Nobody can write to the audit log except the server.** Not staff, not patients. Logins, record views, note signing, exports, payments and settings changes are recorded; only the psychologist can read them. *Cost:* if the server cannot write an audit entry at sign-in, the sign-in is refused (fails safe).
 - **Records of care and money are never deleted.** Appointments, notes, forms, consents, invoices, payments and audit entries cannot be deleted by anyone, including the owner through the app; the database refuses. Patients are archived instead. *Why:* professional and tax record keeping, and tamper-resistance. *Cost:* a legal erasure request needs a careful one-off procedure agreed with your adviser (README section 9).
@@ -53,7 +53,7 @@ Each item: **Decision**, why, and what it costs or limits.
 
 - **Consent is recorded per purpose** (treatment, privacy, telehealth, financial terms, sharing with a referrer, sharing with a medical aid) with the date and the exact form version agreed to. Withdrawing keeps the evidence and creates a task for staff. A patient cannot grant consent without submitting the matching form.
 - **A submitted form cannot be edited.** Staff can return it with a note; the patient corrects and resubmits, and every submission is kept. *Cost:* extra steps for a small fix, in exchange for evidence.
-- **The health-history form is psychologist-only**; the admin cannot read it.
+- **The health-history form and the "What brings you to therapy" form are psychologist-only**; the admin cannot read them. The registration and guardian forms the receptionist can read no longer ask why the person comes, about a child's concerns or about court orders (those questions moved to the psychologist-only form). *Cost:* new patients fill in one extra short form.
 - **Booking terms** are accepted with one tick during booking, recorded as financial-terms consent with the cancellation terms in force at the time.
 - **The wording of every form is a DRAFT** and must be reviewed by you and a legal adviser. Changing a form means publishing a new version; used versions are frozen. *Cost:* wording changes need a developer.
 - **Minors and guardians:** a guardian acts for a child only with the permissions they were given (book, forms, pay), and a guardian without "pay" sees no invoices.
@@ -96,6 +96,24 @@ Each item: **Decision**, why, and what it costs or limits.
 - **Backups and incident handling are procedures, not features:** README section 9.
 - **A weekly check** of tasks, audit log and system status is the main monitoring.
 
+### Decisions from the final review (before go-live)
+
+A last review of the whole system found gaps that the website hid but the database did not close. All are fixed in the database itself, with tests:
+
+- **The authenticator code is checked by the database, not only by the website.** Before, someone with a staff password (but not the code) could have read patient data by calling the database directly with the public key. Now a staff login without the code gets nothing. *Cost:* none for normal use.
+- **Nobody can attach a patient's record to their own login.** Only the patient's own confirmed sign-up (the existing safe linking rules) can link a record to a login; staff included. *Why:* a receptionist could otherwise have read the health history by linking a record to herself. *Cost:* a wrongly linked record is fixed by the owner in SQL.
+- **The bookkeeper sees staff names only,** not the names of patients and guardians (needed only for "recorded by" labels).
+- **The associate role has no access** to any patient data until it can be limited to the associate's own patients (Phase 3). Do not create associate accounts.
+- **A medical-aid claim needs the patient's written permission to share with the scheme** (the "Permission to share information with your medical aid" form), checked when the claim is marked submitted and again on every resubmission. *Why:* a claim sends a diagnosis code, which is health information (POPIA). *Cost:* one more form for medical-aid patients; a claim waits until it is signed.
+- **Clinical questions are only in psychologist-only forms.** "Why are you coming", a child's concerns and court orders moved out of the registration and guardian forms into "What brings you to therapy". Earlier versions stay for history.
+- **Required answers are checked by the database,** so an incomplete consent (for example without the typed signature) cannot be submitted even by bypassing the website.
+- **Tasks, patients and guardianships cannot be deleted through the system;** tasks are marked done, patients archived, guardianships ended with an end date. Deleting a person's login (an owner action in Supabase) still removes their access.
+- **An appointment's patient and session type, and an invoice's patient and appointment, cannot be changed afterwards.** A move makes a new appointment; a wrong invoice is voided and redone. *Why:* history and money must always point at the right person.
+- **No SMS is pretended:** on the live site no SMS is queued or marked sent until a real SMS provider exists, even if SMS is switched on by mistake.
+- **The full ICD-10 list is loaded by a script** from the Council for Medical Schemes' Master Industry Table, which you download yourself (README 6.12).
+- **Refunds and corrections of credit notes stay manual** (README section 9): credit notes and payments cannot be undone in the system; the README describes what to record when you refund, when a credit note was a mistake, and when a scheme pays in full after you wrote off a shortfall. *Cost:* a little bookkeeping by hand, agreed once with your accountant.
+- **Not changed (accepted):** the cancellation reason staff type is visible to the patient (the form warns staff); a separate database schema for one technical extension; the other ledger refinements listed for Phase 2.
+
 ## 3. Where the build differs from the original design
 
 | Original design | What was built | Why |
@@ -112,7 +130,7 @@ Each item: **Decision**, why, and what it costs or limits.
 | Document storage buckets | No file uploads in Phase 1 | Forms are typed answers. |
 | Report on income "vs invoiced" and clinical analytics | Financial, appointments, activity, compliance reports; no clinical analytics | Kept to non-clinical figures. |
 | Calendar views day, week, agenda | Same, with no month view or drag-and-drop | Deferred. |
-| Associate psychologist in the UI | Modelled in the database only | As the spec states. |
+| Associate psychologist in the UI | Modelled in the database only, with no access to any patient data | As the spec states; scoping an associate to their own patients is Phase 3. Do not create associate accounts before then. |
 
 ## 4. Things you need to decide or confirm
 

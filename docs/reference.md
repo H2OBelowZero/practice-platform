@@ -19,9 +19,18 @@ allow-list, and set `APP_URL` to the site's public origin (used for password-res
   -- other staff roles: 'admin', 'bookkeeper', 'associate'
   ```
 - **MFA**: every staff role must pass TOTP (aal2). On first sign-in staff are sent to `/mfa`, scan the QR code with an
-  authenticator app and enter one code; afterwards they enter a code at each sign-in. `requireRole` / `requireUser`
-  (`lib/auth/session.ts`) enforce this on the server for every protected page; middleware only refreshes the session
-  and sends anonymous visitors from `/app` and `/portal` to `/login`.
+  authenticator app and enter one code; afterwards they enter a code at each sign-in. It is enforced twice:
+  (1) **in the database** (migration 0030): `auth_role()`, through which every policy, view and staff function learns the
+  caller's role, returns NULL for a psychologist, admin, bookkeeper or associate whose JWT `aal` claim is not `aal2`. A
+  password-only token used directly against the API (anon key + `signInWithPassword`) therefore reads nothing but the
+  caller's own `profiles` row and every staff function answers `forbidden`; patients and guardians are unaffected;
+  (2) **in the app**: `requireRole` / `requireUser` (`lib/auth/session.ts`) read the caller's own profile (allowed at aal1,
+  so the role is known) and send staff without aal2 to `/mfa` before any page renders. Middleware only refreshes the
+  session and sends anonymous visitors from `/app` and `/portal` to `/login`.
+- **Profiles** (display names, roles; 0031): psychologist and admin read all; bookkeeper and associate read their own and
+  staff profiles only (the "recorded by" labels on billing pages); patients and guardians read only their own.
+- **Account links**: `patients.user_id` can be set or changed only by `ensure_patient_record()` (it runs as the table owner)
+  or by the owner in SQL; every API role, staff and service role included, gets `patient_account_link_protected` (0031).
 - **Audit**: server code calls `audit()` (`lib/audit.ts`), which resolves the verified user and role and writes through
   the service-role-only `audit_append()`. Signed-in users cannot write audit rows (`audit_write` is DB-internal only).
 - **Password reset**: `/recover` emails a link to `/auth/callback`, which lands on `/recover/reset`. That page and its
@@ -233,3 +242,107 @@ CI runs `node scripts/audit-check.mjs` (reads `npm audit --json --omit=dev`): it
 - `braces` / `micromatch` / `fast-glob` / `@next/eslint-plugin-next` via `eslint-config-next` (high). Dev-only (lint time on our own files); the advisory is a stack-exhaustion DoS from deeply nested glob patterns.
 
 Revisit when moving to Next 16 (a planned, tested upgrade, not an `audit fix --force`).
+
+## Where the current definition of each guard and function lives
+
+Many functions were redefined by later migrations (`create or replace`), so the first file that creates a function is often not the one that runs. Before
+changing a function, read the file in the "current definition" column IN FULL and start from that text: a new migration redefines it again (never edit an
+applied file). `tests/unit/reference-functions.test.ts` recomputes this table from `supabase/migrations` and fails when it drifts, so update it in the same
+change. Policies changed after their table's migration: `profiles_self` and `patients_staff_read` (0031), the form-submission policies (0012), the task
+policies (0013). Views: `invoice_balances` (0017), `claim_summary` (0005).
+
+| Function | Current definition | History |
+| --- | --- | --- |
+| `_caller_trusted` | `0005_billing` |  |
+| `_insert_invoice_lines` | `0015_invoice_per_appointment` |  |
+| `_invoice_math_check` | `0015_invoice_per_appointment` |  |
+| `_jwt_role` | `0005_billing` |  |
+| `_record_payment` | `0005_billing` |  |
+| `_set_consent_core` | `0012_form_submit` |  |
+| `_trusted_writer` | `0005_billing` |  |
+| `accept_booking_terms` | `0012_form_submit` |  |
+| `add_addendum` | `0003_notes` |  |
+| `addenda_after` | `0013_notes_hardening` | redefined 1x, first in `0003_notes` |
+| `addenda_guard` | `0003_notes` |  |
+| `append_only_guard` | `0003_notes` |  |
+| `appointments_links_guard` | `0031_access_scoping` |  |
+| `appt_events` | `0002_booking` |  |
+| `appt_no_delete` | `0002_booking` |  |
+| `appt_status_machine` | `0009_appointment_status_machine` |  |
+| `assert_bookable` | `0008_booking_hardening` | redefined 1x, first in `0002_booking` |
+| `assert_booking_cap` | `0008_booking_hardening` |  |
+| `assert_patient_access` | `0002_booking` |  |
+| `audit_append` | `0007_audit_app` |  |
+| `audit_log_guard` | `0001_core` |  |
+| `audit_write` | `0001_core` |  |
+| `auth_role` | `0030_staff_mfa_in_db` | redefined 1x, first in `0001_core` |
+| `billing_open_by_due_date` | `0015_invoice_per_appointment` |  |
+| `billing_totals` | `0016_billing_fixes` | redefined 1x, first in `0015_invoice_per_appointment` |
+| `book_appointment` | `0008_booking_hardening` | redefined 1x, first in `0002_booking` |
+| `busy_ranges` | `0002_booking` |  |
+| `can_access_billing` | `0005_billing` |  |
+| `can_access_forms` | `0004_forms_tasks` |  |
+| `cancel_appointment` | `0010_cancellation_policy` | redefined 1x, first in `0002_booking` |
+| `claim_outbox` | `0023_outbox_fixes` | redefined 1x, first in `0022_outbox_worker` |
+| `claims_events` | `0019_claim_task_meta` | redefined 1x, first in `0005_billing` |
+| `claims_guard` | `0032_claims_insurer_consent` | redefined 3x, first in `0005_billing` |
+| `claims_no_delete` | `0005_billing` |  |
+| `consents_no_delete` | `0004_forms_tasks` |  |
+| `create_invoice_draft` | `0015_invoice_per_appointment` |  |
+| `credit_note_details` | `0018_credit_note_reasons` |  |
+| `credit_notes_after` | `0017_credit_note_portion` | redefined 1x, first in `0005_billing` |
+| `credit_notes_guard` | `0017_credit_note_portion` | redefined 1x, first in `0005_billing` |
+| `dashboard_payments_by_method` | `0024_dashboard_queries` |  |
+| `enqueue_overdue_tasks` | `0022_outbox_worker` |  |
+| `enqueue_reminders` | `0023_outbox_fixes` | redefined 1x, first in `0022_outbox_worker` |
+| `ensure_patient_record` | `0008_booking_hardening` |  |
+| `finish_outbox` | `0023_outbox_fixes` | redefined 1x, first in `0022_outbox_worker` |
+| `fs_after` | `0004_forms_tasks` |  |
+| `fs_guard` | `0012_form_submit` | redefined 1x, first in `0004_forms_tasks` |
+| `fs_no_delete` | `0004_forms_tasks` |  |
+| `ft_guard` | `0004_forms_tasks` |  |
+| `ft_inherit_restricted` | `0012_form_submit` |  |
+| `handle_new_user` | `0006_signup` |  |
+| `import_icd10_codes` | `0034_icd10_import` |  |
+| `invite_patient` | `0011_invite_patient` |  |
+| `invoice_lines_guard` | `0005_billing` |  |
+| `invoice_paid_cents` | `0005_billing` |  |
+| `invoice_recompute` | `0005_billing` |  |
+| `invoices_after` | `0005_billing` |  |
+| `invoices_guard` | `0031_access_scoping` | redefined 3x, first in `0005_billing` |
+| `invoices_no_delete` | `0005_billing` |  |
+| `is_booking_staff` | `0002_booking` |  |
+| `is_staff` | `0001_core` |  |
+| `medical_aid_members_guard` | `0005_billing` |  |
+| `medical_aid_members_no_delete` | `0020_claims_fixes` |  |
+| `my_patient_ids` | `0001_core` |  |
+| `no_delete_guard` | `0031_access_scoping` |  |
+| `notes_guard` | `0013_notes_hardening` | redefined 1x, first in `0003_notes` |
+| `patients_guard` | `0031_access_scoping` | redefined 3x, first in `0001_core` |
+| `payments_after` | `0005_billing` |  |
+| `payments_guard` | `0005_billing` |  |
+| `raise_payfast_unreconciled` | `0014_payfast_unreconciled` |  |
+| `raise_risk_task` | `0013_notes_hardening` |  |
+| `record_payment` | `0005_billing` |  |
+| `record_scheme_remittance` | `0020_claims_fixes` | redefined 1x, first in `0005_billing` |
+| `release_outbox` | `0023_outbox_fixes` |  |
+| `report_appointments` | `0025_reports` |  |
+| `report_compliance` | `0028_compliance_settings` | redefined 1x, first in `0025_reports` |
+| `report_debtors_ageing` | `0025_reports` |  |
+| `report_debtors_detail` | `0025_reports` |  |
+| `report_income_by_method` | `0025_reports` |  |
+| `report_income_by_month` | `0025_reports` |  |
+| `report_income_by_session_type` | `0025_reports` |  |
+| `report_practice_activity` | `0025_reports` |  |
+| `report_transactions` | `0025_reports` |  |
+| `reschedule_appointment` | `0010_cancellation_policy` | redefined 2x, first in `0002_booking` |
+| `sa_today` | `0005_billing` |  |
+| `sast_short_date` | `0022_outbox_worker` |  |
+| `save_invoice_draft` | `0015_invoice_per_appointment` |  |
+| `set_consent` | `0012_form_submit` | redefined 1x, first in `0004_forms_tasks` |
+| `set_day_availability` | `0027_settings_audit` |  |
+| `settings_audit` | `0027_settings_audit` |  |
+| `sign_note` | `0003_notes` |  |
+| `staff_form_access` | `0012_form_submit` |  |
+| `submit_form` | `0033_submit_form_required_fields` | redefined 1x, first in `0012_form_submit` |
+| `template_restricted` | `0012_form_submit` |  |
