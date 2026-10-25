@@ -103,3 +103,33 @@ export async function openTasks(source: string) {
 export async function setGuardianPay(guardianUserId: string, patientId: string, pay: boolean) {
   must(await svc().from("guardianships").update({ permissions: { book: true, forms: true, pay } }).eq("guardian_user_id", guardianUserId).eq("patient_id", patientId).select("id"), "guardian permissions");
 }
+
+// ---- test shortcuts ---------------------------------------------------------------------------------------------------------------------
+/** A patient with a confirmed login (created through the admin API) and a linked, active patients row. Returns ids and the sign-in details. */
+export async function createPatientWithLogin(label: string, password: string) {
+  const stamp = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`;
+  const email = `e2e.${label}.${stamp}@demo.test`;
+  const userId = await createConfirmedUser(email, password, `E2E ${label}`);
+  const row = must(await svc().from("patients").insert({ user_id: userId, first_name: "E2E", last_name: `${label}${stamp}`, email, status: "active" }).select("id").single(), "insert patient") as { id: string };
+  return { email, userId, patientId: row.id, name: `E2E ${label}${stamp}` };
+}
+/** Time travel for a confirmed appointment: the app only offers "Mark attended" once the session has started. */
+export async function moveToPast(appointmentId: string, minutesAgo = 120) {
+  const a = must(await svc().from("appointments").select("starts_at,ends_at").eq("id", appointmentId).single(), "read appointment") as { starts_at: string; ends_at: string };
+  const len = new Date(a.ends_at).getTime() - new Date(a.starts_at).getTime();
+  const start = new Date(Date.now() - minutesAgo * 60_000);
+  must(await svc().from("appointments").update({ starts_at: start.toISOString(), ends_at: new Date(start.getTime() + len).toISOString() }).eq("id", appointmentId).select("id"), "move appointment");
+}
+export async function appointmentStatus(id: string): Promise<string> {
+  return (must(await svc().from("appointments").select("status").eq("id", id).single(), "appointment status") as { status: string }).status;
+}
+export async function appointmentsOf(patientId: string) {
+  return must(await svc().from("appointments").select("id,status,starts_at,cancel_reason").eq("patient_id", patientId).order("created_at"), "appointments") as
+    { id: string; status: string; starts_at: string; cancel_reason: string | null }[];
+}
+export async function lateFeeCents(): Promise<number> {
+  return (must(await svc().from("practices").select("late_cancel_fee_cents").limit(1).single(), "practice") as { late_cancel_fee_cents: number }).late_cancel_fee_cents;
+}
+export async function addMedicalAidMember(patientId: string) {
+  must(await svc().from("medical_aid_members").insert({ patient_id: patientId, scheme: "Demo Medical Scheme", plan: "Demo Plan", member_number: `E2E-${Date.now()}`, dependant_code: "00", valid_from: "2024-01-01" }).select("id"), "insert member");
+}
