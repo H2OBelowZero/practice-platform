@@ -22,13 +22,15 @@ export function NavLinks({ items, variant, label }: { items: NavItem[]; variant:
             <li key={it.href} className={variant === "bottom" ? "min-w-0" : undefined}>
               <Link href={it.href} aria-current={active ? "page" : undefined}
                     className={cx(
-                      "flex items-center no-underline transition-colors duration-150",
-                      variant === "sidebar" && "min-h-11 gap-3 rounded-xl px-3 py-2 text-base",
-                      variant === "sidebar" && (active ? "bg-sage-800 font-semibold text-white" : "text-sage-100 hover:bg-sage-800 hover:text-white"),
+                      "flex items-center no-underline transition-[color,background-color,border-color,box-shadow] duration-200",
+                      variant === "sidebar" && "min-h-11 gap-3 rounded-xl px-3 py-2 text-[0.95rem]",
+                      variant === "sidebar" && (active
+                        ? "bg-gold-200 font-semibold text-sage-900 shadow-[0_1px_2px_rgb(0_0_0/0.12)] hover:text-sage-900"
+                        : "text-sage-100 hover:bg-white/8 hover:text-white"),
                       variant === "bottom" && "min-h-14 flex-col justify-center gap-0.5 border-t-2 px-1 py-1.5 text-xs",
-                      variant === "bottom" && (active ? "border-sage-200 font-semibold text-white" : "border-transparent text-sage-200 hover:text-white"),
+                      variant === "bottom" && (active ? "border-gold-400 font-semibold text-gold-200 hover:text-gold-200" : "border-transparent text-sage-300 hover:text-white"),
                       variant === "top" && "min-h-11 gap-2 rounded-xl px-3.5 py-2 text-base",
-                      variant === "top" && (active ? "bg-sage-100 font-semibold text-sage-900" : "text-ink hover:bg-sunk hover:text-ink"),
+                      variant === "top" && (active ? "bg-sage-100 font-semibold text-sage-900 hover:text-sage-900" : "text-ink hover:bg-sunk hover:text-ink"),
                     )}>
                 <Icon name={it.icon} className={variant === "bottom" ? "text-lg" : undefined} />
                 <span className={variant === "bottom" ? "truncate" : undefined}>{it.label}</span>

@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-// Colours are the globals.css tokens: canvas #faf8f4 (background) and sage-700 #3f5f4d (theme). No service worker: not an offline app.
+// Colours are the globals.css tokens: canvas #f7f3ea (background) and sage-900 #173a2f (theme). No service worker: not an offline app.
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Practice Platform",
@@ -8,8 +8,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Online booking and client portal for a private psychology practice.",
     start_url: "/",
     display: "standalone",
-    background_color: "#faf8f4",
-    theme_color: "#3f5f4d",
+    background_color: "#f7f3ea",
+    theme_color: "#173a2f",
     icons: [{ src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" }],
   };
 }

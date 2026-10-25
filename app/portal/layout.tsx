@@ -6,6 +6,7 @@ import { SkipLink } from "@/components/ui/skip-link";
 import { EmergencyNotice } from "@/components/ui/emergency-notice";
 import { NavLinks } from "@/components/shell/nav-links";
 import { SignOutButton } from "@/components/shell/sign-out";
+import { Wordmark } from "@/components/shell/ornament";
 
 // Settings sits beside Sign out in the header (the four main links stay the only items of the main navigation).
 const SettingsLink = () => (
@@ -23,9 +24,9 @@ export default async function PortalLayout({ children }: { children: React.React
   return (
     <div className="flex min-h-screen flex-col">
       <SkipLink />
-      <header className="no-print border-b border-line bg-surface">
+      <header className="no-print sticky top-0 z-30 border-b border-line/70 bg-canvas/85 backdrop-blur-sm">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-4 py-3 sm:px-8">
-          <Link href="/portal" className="font-serif text-lg font-semibold text-sage-700 no-underline hover:text-sage-800">{practice?.name ?? "Practice"}</Link>
+          <Link href="/portal" className="min-w-0 no-underline"><Wordmark name={practice?.name ?? "Practice"} tagline="Your care, your space" className="text-[0.95rem]" /></Link>
           <div className="hidden items-center gap-2 lg:flex">
             <NavLinks items={items} variant="top" label="Main" />
             <SettingsLink />
@@ -41,7 +42,7 @@ export default async function PortalLayout({ children }: { children: React.React
           <p className="mt-4 text-sm"><Link href="/portal/privacy">Privacy and consent</Link></p>
         </footer>
       </div>
-      <div className="no-print on-dark fixed inset-x-0 bottom-0 z-40 border-t border-sage-800 bg-sage-900 pb-[env(safe-area-inset-bottom)] lg:hidden">
+      <div className="no-print on-dark fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-sage-900 pb-[env(safe-area-inset-bottom)] lg:hidden">
         <NavLinks items={items} variant="bottom" label="Main (phone)" />
       </div>
     </div>

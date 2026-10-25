@@ -30,6 +30,7 @@ export function Field({ id, label, hint, error, required, children }: FieldProps
 
 const CONTROL =
   "block min-h-11 w-full rounded-xl border border-line-strong bg-surface px-3.5 py-2 text-base text-ink placeholder:text-ink-muted " +
+  "transition-[border-color,box-shadow] duration-200 hover:border-sage-700 focus:border-sage-700 focus:shadow-[0_0_0_4px_rgb(36_81_63/0.1)] " +
   "aria-[invalid=true]:border-danger aria-[invalid=true]:border-2 disabled:bg-sunk disabled:text-ink-muted";
 
 type Common = { id: string; label: string; hint?: string; error?: string };

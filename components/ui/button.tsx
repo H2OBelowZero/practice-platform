@@ -6,10 +6,11 @@ export type ButtonVariant = "primary" | "secondary" | "quiet" | "danger";
 
 const BASE =
   "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-5 py-2 text-base font-medium leading-tight no-underline " +
-  "transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60 aria-disabled:cursor-not-allowed aria-disabled:opacity-60";
+  "transition-[color,background-color,border-color,box-shadow,transform] duration-200 ease-out active:scale-[0.98] active:duration-75 " +
+  "disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100 aria-disabled:cursor-not-allowed aria-disabled:opacity-60";
 const VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-sage-700 text-white hover:bg-sage-800 hover:text-white",
-  secondary: "border border-line-strong bg-surface text-ink hover:bg-sunk hover:text-ink",
+  primary: "bg-sage-700 text-white shadow-[0_1px_2px_rgb(23_58_47/0.2)] hover:bg-sage-800 hover:text-white hover:shadow-[0_6px_16px_-6px_rgb(23_58_47/0.45)]",
+  secondary: "border border-line-strong bg-surface text-ink hover:border-sage-700 hover:bg-sage-100 hover:text-sage-900",
   quiet: "bg-transparent text-blue-700 hover:bg-blue-100 hover:text-blue-800",
   danger: "bg-danger text-white hover:bg-danger-strong hover:text-white",
 };

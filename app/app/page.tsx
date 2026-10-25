@@ -52,8 +52,8 @@ export default async function StaffHome() {
 
       <section aria-labelledby="tiles-h" className="mb-8">
         <h2 id="tiles-h" className="sr-only">At a glance</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Tile label="Today's sessions" href="/app/calendar?view=day" unavailable={!sessions} value={tileCount(sessions?.length)}
+        <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <Tile icon="calendar" label="Today's sessions" href="/app/calendar?view=day" unavailable={!sessions} value={tileCount(sessions?.length)}
             note={sessions ? (sessions.length === 0 ? "No sessions today" : statusMixText(sessions)) : undefined} />
           <AwaitingTile hint={me.role === "admin" ? "Some forms are only visible to the practitioner." : undefined} value={awaitingKnown.length ? String(awaitingKnown.reduce((a, n) => a + n, 0)) : tileCount(null)} partial={awaitingKnown.length < awaitingParts.length}
             rows={[
@@ -61,17 +61,17 @@ export default async function StaffHome() {
               { label: "Forms submitted this week", count: forms, href: d.forms.ok && d.forms.data.newestPatientId ? `/app/patients/${d.forms.data.newestPatientId}?tab=forms` : "/app/patients" },
               { label: "Tasks due today or overdue", count: dueTasks, href: "/app/tasks?due=now" },
             ]} />
-          <Tile label="Outstanding invoices" href="/app/billing" unavailable={!d.invoices.ok} value={d.invoices.ok ? formatZar(d.invoices.data.openCents) : "–"}
+          <Tile icon="card" label="Outstanding invoices" href="/app/billing" unavailable={!d.invoices.ok} value={d.invoices.ok ? formatZar(d.invoices.data.openCents) : "–"}
             note={d.invoices.ok ? (d.invoices.data.openN === 0 ? "Nothing is owed" : `${countText(d.invoices.data.openN, "open invoice", "open invoices")}; ${d.invoices.data.overdueN === 0 ? "none overdue" : `${d.invoices.data.overdueN} overdue (${formatZar(d.invoices.data.overdueCents)})`}`) : undefined}
             attention={d.invoices.ok && d.invoices.data.overdueN > 0} />
           {showNotes && (
-            <Tile label="Notes to complete" unavailable={!notes} value={tileCount(notes?.count)}
+            <Tile icon="pencil" label="Notes to complete" unavailable={!notes} value={tileCount(notes?.count)}
               href={firstNote ? `/app/patients/${firstNote.patient_id}/notes/new?appointment=${firstNote.id}` : "/app/patients"}
               note={notes ? (notes.count === 0 ? "All sessions have a signed note" : "Sessions with no signed note. Opens the oldest.") : undefined} />
           )}
-          <Tile label="Unreconciled PayFast payments" href="/app/tasks?group=payfast" unavailable={pf === null} value={tileCount(pf)}
+          <Tile icon="send" label="Unreconciled PayFast payments" href="/app/tasks?group=payfast" unavailable={pf === null} value={tileCount(pf)}
             note={pf === null ? undefined : pf === 0 ? "None waiting" : "Money received that needs matching"} attention={!!pf && pf > 0} />
-          <Tile label="Claims needing attention" href="/app/claims" unavailable={!d.claims.ok} value={d.claims.ok ? String(d.claims.data.rejected + d.claims.data.stale) : "–"}
+          <Tile icon="shield" label="Claims needing attention" href="/app/claims" unavailable={!d.claims.ok} value={d.claims.ok ? String(d.claims.data.rejected + d.claims.data.stale) : "–"}
             note={d.claims.ok ? `${d.claims.data.rejected} rejected, ${d.claims.data.stale} waiting over 30 days` : undefined}
             attention={d.claims.ok && d.claims.data.rejected + d.claims.data.stale > 0} />
         </div>

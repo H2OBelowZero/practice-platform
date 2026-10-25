@@ -1,43 +1,52 @@
 @import "tailwindcss";
 
 /*
- * Design tokens. Direction: warm, calm, professional (spec section 3): soft sage, muted blue, warm white, neutral grey.
- * Light theme only on purpose: the warm-white surface is part of the brand.
+ * Design tokens. Direction: deep forest green, warm ivory and muted gold. Calm, considered, professional.
+ * Light theme only on purpose: the ivory surface is part of the brand.
+ * The `sage-*` names are kept from the first palette (55 call sites); they now hold the forest greens.
  *
  * Contrast (WCAG 2.x, computed): every text/background pair used by the components is AA (>= 4.5:1), large text and
  * UI boundaries >= 3:1.
- *   ink        #23292d on canvas #faf8f4 ... 13.9   on white ... 14.7
- *   ink-muted  #5c6168 on canvas ........... 5.9   on sunk #f1eee7 ... 5.4   on white ... 6.2
- *   white on sage-700 #3f5f4d (primary button) .. 7.1     white on sage-800 hover #344e3f ... 9.1
- *   sage-700 text on canvas ................ 6.7
- *   blue-700 #3d6189 (links, focus ring) on canvas ... 6.1   on white ... 6.4
- *   danger #9b2c2c on canvas ............... 7.1   white on danger button ... 7.5
- *   notice/chip text on its tint: success 7.3-7.6, info 7.1-7.3, warning 6.1-6.5, danger 7.4, neutral 6.9
- *   sidebar: #e9f1ec on #2f4a3b ... 8.4, #c3d3c9 on #2f4a3b ... 6.2
- *   input border #7d8388 on canvas ......... 3.6 (non-text contrast >= 3)
- * The soft sage #7a9a86 and muted blue #5b7fa6 are brand/decoration colours only (2.9 and 3.9 on canvas): they never
- * carry text. Text variants are the darker -700/-800 steps.
+ *   ink        #1f2a26 on canvas #f7f3ea ... 13.4
+ *   ink-muted  #5a625d on canvas ........... 5.7   on sunk #efe9dc ... 5.2   on white ... 6.3
+ *   white on sage-700 #24513f (primary button) .. 9.0     white on sage-800 hover #1e4639 ... 10.6
+ *   sage-700 text on canvas ................ 8.2
+ *   blue-700 #2f5e5a (links, focus ring) on canvas ... 6.6   on white ... 7.3
+ *   gold-700 #7a5b1e on canvas ............. 5.7   on gold-100 ... 5.4
+ *   sage-900 #173a2f on gold-200 (active nav) ... 8.9
+ *   sidebar: #e7efe9 on #173a2f ... 10.7, #b9cbbf on #173a2f ... 7.3, gold-400 on #173a2f ... 5.9
+ *   notice/chip text on its tint: success 9.5, info 8.4, warning 6.1, danger 7.4, neutral 6.9
+ *   input border #857d6c on canvas ......... 3.7 (non-text contrast >= 3)
+ * gold-400/500 and sage-500 are decoration only on light surfaces: they never carry text there.
  */
 @theme {
-  --color-canvas: #faf8f4;
+  --color-canvas: #f7f3ea;
   --color-surface: #ffffff;
-  --color-sunk: #f1eee7;
-  --color-line: #ddd8cc;
-  --color-line-strong: #7d8388;
-  --color-ink: #23292d;
-  --color-ink-muted: #5c6168;
+  --color-sunk: #efe9dc;
+  --color-line: #e5ddcb;
+  --color-line-strong: #857d6c;
+  --color-ink: #1f2a26;
+  --color-ink-muted: #5a625d;
 
-  --color-sage-100: #e9f1ec;
-  --color-sage-200: #cfe0d6;
-  --color-sage-500: #7a9a86;
-  --color-sage-700: #3f5f4d;
-  --color-sage-800: #344e3f;
-  --color-sage-900: #2f4a3b;
+  --color-sage-100: #e7efe9;
+  --color-sage-200: #d6e4db;
+  --color-sage-300: #b9cbbf;
+  --color-sage-500: #6f9583;
+  --color-sage-700: #24513f;
+  --color-sage-800: #1e4639;
+  --color-sage-900: #173a2f;
+  --color-sage-950: #102a22;
 
-  --color-blue-100: #e3ecf5;
-  --color-blue-500: #5b7fa6;
-  --color-blue-700: #3d6189;
-  --color-blue-800: #2f4f73;
+  --color-gold-100: #f6eedc;
+  --color-gold-200: #ead8af;
+  --color-gold-400: #cfae6b;
+  --color-gold-500: #b8924a;
+  --color-gold-700: #7a5b1e;
+
+  --color-blue-100: #e5ecec;
+  --color-blue-500: #5f8a87;
+  --color-blue-700: #2f5e5a;
+  --color-blue-800: #224845;
 
   --color-danger: #9b2c2c;
   --color-danger-strong: #8f2626;
@@ -47,22 +56,29 @@
   --color-grey-ink: #4a4f55;
   --color-grey-tint: #ecebe7;
 
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  /* Self-hosted by next/font in app/layout.tsx (no runtime requests to Google; CSP font-src 'self' holds). */
+  --font-sans: var(--font-body), system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-display: var(--font-heading), var(--font-body), system-ui, sans-serif;
+  --font-script: var(--font-flourish), "Segoe Script", cursive;
+  --font-serif: var(--font-display);
 
-  --radius-card: 14px;
-  --shadow-card: 0 1px 2px rgb(35 41 45 / 0.05), 0 4px 16px rgb(35 41 45 / 0.04);
+  --radius-card: 16px;
+  --shadow-card: 0 1px 2px rgb(23 58 47 / 0.04);
+  --shadow-lift: 0 2px 4px rgb(23 58 47 / 0.04), 0 12px 28px -8px rgb(23 58 47 / 0.14);
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-rise: rise 560ms var(--ease-out-expo) both;
 }
 
 :root {
   color-scheme: light;
   --focus: var(--color-blue-700);
-  --focus-on-dark: #dbe8f4;
+  --focus-on-dark: var(--color-gold-200);
 }
 
 /* Base element styles live in the base layer so Tailwind utilities (text-white on a link, etc.) can override them. */
 @layer base {
-  html { -webkit-text-size-adjust: 100%; }
+  html { -webkit-text-size-adjust: 100%; scrollbar-color: var(--color-line-strong) var(--color-canvas); }
 
   body {
     background: var(--color-canvas);
@@ -72,17 +88,22 @@
     line-height: 1.6;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
+    caret-color: var(--color-sage-700);
+    accent-color: var(--color-sage-700);
   }
 
-  h1, h2, h3 { font-family: var(--font-serif); letter-spacing: -0.005em; line-height: 1.25; color: var(--color-ink); text-wrap: balance; }
-  h1 { font-size: 1.75rem; font-weight: 600; }
-  h2 { font-size: 1.3rem; font-weight: 600; }
-  h3 { font-size: 1.1rem; font-weight: 600; }
-  @media (min-width: 640px) { h1 { font-size: 2rem; } }
+  h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.015em; line-height: 1.25; color: var(--color-ink); text-wrap: balance; }
+  h1 { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.025em; }
+  h2 { font-size: 1.2rem; font-weight: 600; }
+  h3 { font-size: 1.05rem; font-weight: 600; }
+  @media (min-width: 640px) { h1 { font-size: 2.125rem; } }
   p { text-wrap: pretty; }
 
-  a { color: var(--color-blue-700); text-underline-offset: 3px; }
+  a { color: var(--color-blue-700); text-underline-offset: 3px; text-decoration-thickness: 1px; transition: color 150ms; }
   a:hover { color: var(--color-blue-800); }
+
+  /* Money, times and counts line up in columns. */
+  td, dd, time { font-variant-numeric: tabular-nums; }
 }
 
 /* Visible 3px focus ring on everything focusable (keyboard only, so mouse clicks stay quiet). */
@@ -92,11 +113,42 @@
    the browser treats the focus as keyboard-like: a mouse click inside <main> must not outline the whole page. */
 [tabindex="-1"]:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
-::selection { background: var(--color-sage-200); color: var(--color-ink); }
+::selection { background: var(--color-gold-200); color: var(--color-sage-950); }
 
-/* Respect reduced-motion: no transitions or animations, no smooth scrolling. */
+/* ---- Motion ----
+ * One authored moment: the gold linework in the sidebar and the public pages draws itself once on load (.draw).
+ * Everything else is continuity and feedback: each page settles in on navigation (.page-enter, the template.tsx files under app/app and app/portal),
+ * the dashboard tiles arrive as one short list (.stagger, capped at 6 x 45ms), and hover/press states acknowledge the pointer. */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); filter: blur(3px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@keyframes draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes fade { from { opacity: 0; } }
+
+.page-enter { animation: var(--animate-rise); }
+.stagger > * { animation: var(--animate-rise); }
+.stagger > :nth-child(2) { animation-delay: 45ms; }
+.stagger > :nth-child(3) { animation-delay: 90ms; }
+.stagger > :nth-child(4) { animation-delay: 135ms; }
+.stagger > :nth-child(5) { animation-delay: 180ms; }
+.stagger > :nth-child(n + 6) { animation-delay: 225ms; }
+
+/* SVG paths carry pathLength="1" so the dash maths is the same for every curve. */
+.draw path { stroke-dasharray: 1; animation: draw 1800ms var(--ease-out-expo) 200ms both; }
+.draw path:nth-child(2) { animation-delay: 380ms; }
+.draw path:nth-child(3) { animation-delay: 560ms; }
+.draw .fill { animation: fade 900ms ease-out 900ms both; }
+
+/* Hoverable cards (dashboard tiles): lift on a soft shadow, gold edge. */
+.lift { transition: transform 260ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo), border-color 200ms, background-color 200ms; }
+.lift:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); border-color: var(--color-gold-200); }
+.lift:active { transform: translateY(0); transition-duration: 100ms; }
+
+/* Reduced motion: no movement or blur, no drawn lines (they render complete); colour and state feedback stay. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  .lift:hover { transform: none; }
 }
 @media (prefers-reduced-motion: no-preference) {
   html { scroll-behavior: smooth; }
@@ -116,6 +168,7 @@
   .has-bottom-nav { padding-bottom: 0; }
   body, .bg-canvas { background: #fff !important; }
   main { max-width: none !important; padding: 0 !important; }
+  .page-enter, .stagger > * { animation: none !important; }
   .print-sheet { border: 0 !important; box-shadow: none !important; padding: 0 !important; }
   a { color: inherit; text-decoration: none; }
 }

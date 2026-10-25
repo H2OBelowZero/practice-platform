@@ -19,9 +19,9 @@ function Block({ id, title, action, children }: { id: string; title: string; act
   return (
     <section aria-labelledby={id}>
       <Card>
-        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id={id} className="text-lg">{title}</h2>
-          {action}
+        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id={id} className="text-[1.05rem]">{title}</h2>
+          {action && <span className="text-sm font-medium [&_a]:text-sage-700 [&_a]:no-underline [&_a:hover]:underline">{action}</span>}
         </div>
         {children}
       </Card>
@@ -29,7 +29,7 @@ function Block({ id, title, action, children }: { id: string; title: string; act
   );
 }
 const Empty = ({ children }: { children: ReactNode }) => <p className="text-ink-muted">{children}</p>;
-const LIST = "m-0 grid list-none gap-3 p-0";
+const LIST = "m-0 list-none divide-y divide-line p-0 [&>li]:py-3 [&>li:first-child]:pt-0 [&>li:last-child]:pb-0";
 const ROW = "flex flex-wrap items-center justify-between gap-x-4 gap-y-1";
 
 /** Today's schedule: time, patient, session type, format, length and status; each row opens the appointment. */
@@ -40,9 +40,12 @@ export function ScheduleSection({ s }: { s: Section<DashAppt[]> }) {
         <ul className={LIST} aria-label="Today's sessions">
           {s.data.map((a) => (
             <li key={a.id} className={ROW}>
-              <div>
-                <Link href={`/app/calendar/${a.id}`} className="font-medium">{sastTime(a.starts_at)} · {a.patientName}</Link>
-                <p className="text-sm text-ink-muted">{a.typeName} · {formatLabel(a.format)} · {a.minutes} minutes</p>
+              <div className="flex min-w-0 items-baseline gap-4">
+                <time aria-hidden="true" dateTime={a.starts_at} className="w-12 shrink-0 font-display text-sm font-semibold text-sage-900">{sastTime(a.starts_at)}</time>
+                <div className="min-w-0">
+                  <Link href={`/app/calendar/${a.id}`} className="font-medium text-ink no-underline hover:text-sage-700 hover:underline"><span className="sr-only">{sastTime(a.starts_at)} · </span>{a.patientName}</Link>
+                  <p className="text-sm text-ink-muted">{a.typeName} · {formatLabel(a.format)} · {a.minutes} minutes</p>
+                </div>
               </div>
               <StatusChip status={a.status} />
             </li>
