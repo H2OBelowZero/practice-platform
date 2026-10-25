@@ -58,30 +58,36 @@ test.describe("staff tasks", () => {
     await expect(page).toHaveURL(/due=overdue/);
   });
 
-  test("an unmatched PayFast payment shows its figures", async ({ page }) => {
-    test.skip(!process.env.E2E_BASE_HAS_DATA, "needs the seeded unreconciled PayFast task");
-    await page.goto("/app/tasks?group=billing");
-    await expect(page.getByText("Payment received at PayFast that could not be matched").first()).toBeVisible();
+  test.describe("an unmatched PayFast payment shows its figures", () => {
+    test.skip(!process.env.E2E_BASE_HAS_DATA, "needs the seeded unreconciled PayFast task"); // at describe level so no browser is started when the inputs are missing
+    test("an unmatched PayFast payment shows its figures", async ({ page }) => {
+      await page.goto("/app/tasks?group=billing");
+      await expect(page.getByText("Payment received at PayFast that could not be matched").first()).toBeVisible();
+    });
   });
 });
 
 test.describe("who sees what", () => {
-  test("the admin does not get the clinical risk filter", async ({ browser }) => {
-    test.skip(!ADMIN, "set E2E_ADMIN_STATE");
-    const ctx = await browser.newContext({ storageState: ADMIN });
-    const page = await ctx.newPage();
-    await page.goto("/app/tasks");
-    await expect(page.getByRole("heading", { level: 1, name: "Tasks" })).toBeVisible();
-    await expect(page.getByLabel("Kind").locator("option", { hasText: "Clinical risk" })).toHaveCount(0);
-    await ctx.close();
+  test.describe("the admin does not get the clinical risk filter", () => {
+    test.skip(!ADMIN, "set E2E_ADMIN_STATE"); // at describe level so no browser is started when the inputs are missing
+    test("the admin does not get the clinical risk filter", async ({ browser }) => {
+      const ctx = await browser.newContext({ storageState: ADMIN });
+      const page = await ctx.newPage();
+      await page.goto("/app/tasks");
+      await expect(page.getByRole("heading", { level: 1, name: "Tasks" })).toBeVisible();
+      await expect(page.getByLabel("Kind").locator("option", { hasText: "Clinical risk" })).toHaveCount(0);
+      await ctx.close();
+    });
   });
 
-  test("the bookkeeper gets a 404 for tasks", async ({ browser }) => {
-    test.skip(!BOOKKEEPER, "set E2E_BOOKKEEPER_STATE");
-    const ctx = await browser.newContext({ storageState: BOOKKEEPER });
-    const page = await ctx.newPage();
-    expect((await page.goto("/app/tasks"))?.status()).toBe(404);
-    expect((await page.goto("/app/tasks/new"))?.status()).toBe(404);
-    await ctx.close();
+  test.describe("the bookkeeper gets a 404 for tasks", () => {
+    test.skip(!BOOKKEEPER, "set E2E_BOOKKEEPER_STATE"); // at describe level so no browser is started when the inputs are missing
+    test("the bookkeeper gets a 404 for tasks", async ({ browser }) => {
+      const ctx = await browser.newContext({ storageState: BOOKKEEPER });
+      const page = await ctx.newPage();
+      expect((await page.goto("/app/tasks"))?.status()).toBe(404);
+      expect((await page.goto("/app/tasks/new"))?.status()).toBe(404);
+      await ctx.close();
+    });
   });
 });

@@ -15,7 +15,7 @@ const PA = "b0000000-0000-4000-8000-000000000011", PB = "b0000000-0000-4000-8000
 
 async function run(c: Client): Promise<string[]> {
   const notices: string[] = [];
-  const on = (n: { message: string }) => notices.push(n.message);
+  const on = (n: { message?: string }) => { notices.push(n.message ?? ""); };
   c.on("notice", on);
   try { await c.query(seed); } finally { c.off("notice", on); } // the whole file, as `supabase db reset` runs it: templates first, then the demo block
   return notices;

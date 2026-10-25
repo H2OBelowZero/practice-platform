@@ -34,3 +34,6 @@ yarn-error.log*
 
 # controller scratch
 .superpowers/
+
+# end-to-end sign-in states and TOTP secrets (never commit)
+/tests/e2e/.auth/

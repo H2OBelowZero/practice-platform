@@ -46,27 +46,31 @@ test.describe("psychologist reports", () => {
 });
 
 test.describe("other roles", () => {
-  test("the admin has no Compliance report", async ({ browser }) => {
-    test.skip(!ADMIN, "set E2E_ADMIN_STATE");
-    const ctx = await browser.newContext({ storageState: ADMIN });
-    const page = await ctx.newPage();
-    await page.goto("/app/reports?report=compliance");
-    await expect(page.getByRole("link", { name: "Compliance", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Appointments", exact: true })).toBeVisible();
-    const res = await page.request.get("/app/reports/export?report=compliance&from=2031-01-01&to=2031-01-31");
-    expect(res.status()).toBe(403);
-    await ctx.close();
+  test.describe("the admin has no Compliance report", () => {
+    test.skip(!ADMIN, "set E2E_ADMIN_STATE"); // at describe level so no browser is started when the inputs are missing
+    test("the admin has no Compliance report", async ({ browser }) => {
+      const ctx = await browser.newContext({ storageState: ADMIN });
+      const page = await ctx.newPage();
+      await page.goto("/app/reports?report=compliance");
+      await expect(page.getByRole("link", { name: "Compliance", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("link", { name: "Appointments", exact: true })).toBeVisible();
+      const res = await page.request.get("/app/reports/export?report=compliance&from=2031-01-01&to=2031-01-31");
+      expect(res.status()).toBe(403);
+      await ctx.close();
+    });
   });
 
-  test("the bookkeeper has the Financial report only, without patient names", async ({ browser }) => {
-    test.skip(!BOOKKEEPER, "set E2E_BOOKKEEPER_STATE");
-    const ctx = await browser.newContext({ storageState: BOOKKEEPER });
-    const page = await ctx.newPage();
-    await page.goto("/app/reports?report=appointments");
-    await expect(page.getByRole("link", { name: "Appointments", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Income by month" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Patient", exact: true })).toHaveCount(0);
-    expect((await page.request.get("/app/reports/export?report=appointments&from=2031-01-01&to=2031-01-31")).status()).toBe(403);
-    await ctx.close();
+  test.describe("the bookkeeper has the Financial report only, without patient names", () => {
+    test.skip(!BOOKKEEPER, "set E2E_BOOKKEEPER_STATE"); // at describe level so no browser is started when the inputs are missing
+    test("the bookkeeper has the Financial report only, without patient names", async ({ browser }) => {
+      const ctx = await browser.newContext({ storageState: BOOKKEEPER });
+      const page = await ctx.newPage();
+      await page.goto("/app/reports?report=appointments");
+      await expect(page.getByRole("link", { name: "Appointments", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("heading", { name: "Income by month" })).toBeVisible();
+      await expect(page.getByRole("columnheader", { name: "Patient", exact: true })).toHaveCount(0);
+      expect((await page.request.get("/app/reports/export?report=appointments&from=2031-01-01&to=2031-01-31")).status()).toBe(403);
+      await ctx.close();
+    });
   });
 });

@@ -40,54 +40,62 @@ test.describe("psychologist dashboard", () => {
 });
 
 test.describe("other roles", () => {
-  test("the admin sees the operational tiles but no notes tile", async ({ browser }) => {
-    test.skip(!ADMIN, "set E2E_ADMIN_STATE");
-    const ctx = await browser.newContext({ storageState: ADMIN });
-    const page = await ctx.newPage();
-    await page.goto("/app");
-    await expect(page.getByText("Outstanding invoices", { exact: true }).first()).toBeVisible();
-    await expect(page.getByText("Notes to complete")).toHaveCount(0);
-    await ctx.close();
+  test.describe("the admin sees the operational tiles but no notes tile", () => {
+    test.skip(!ADMIN, "set E2E_ADMIN_STATE"); // at describe level so no browser is started when the inputs are missing
+    test("the admin sees the operational tiles but no notes tile", async ({ browser }) => {
+      const ctx = await browser.newContext({ storageState: ADMIN });
+      const page = await ctx.newPage();
+      await page.goto("/app");
+      await expect(page.getByText("Outstanding invoices", { exact: true }).first()).toBeVisible();
+      await expect(page.getByText("Notes to complete")).toHaveCount(0);
+      await ctx.close();
+    });
   });
 
-  test("the bookkeeper is sent to billing", async ({ browser }) => {
-    test.skip(!BOOKKEEPER, "set E2E_BOOKKEEPER_STATE");
-    const ctx = await browser.newContext({ storageState: BOOKKEEPER });
-    const page = await ctx.newPage();
-    await page.goto("/app");
-    await expect(page).toHaveURL(/\/app\/billing/);
-    await ctx.close();
+  test.describe("the bookkeeper is sent to billing", () => {
+    test.skip(!BOOKKEEPER, "set E2E_BOOKKEEPER_STATE"); // at describe level so no browser is started when the inputs are missing
+    test("the bookkeeper is sent to billing", async ({ browser }) => {
+      const ctx = await browser.newContext({ storageState: BOOKKEEPER });
+      const page = await ctx.newPage();
+      await page.goto("/app");
+      await expect(page).toHaveURL(/\/app\/billing/);
+      await ctx.close();
+    });
   });
 });
 
 test.describe("audit viewer", () => {
-  test("psychologist: filter, page and download a CSV; the download is itself recorded", async ({ browser }) => {
-    test.skip(!STAFF, "set E2E_STAFF_STATE");
-    const ctx = await browser.newContext({ storageState: STAFF });
-    const page = await ctx.newPage();
-    await page.goto("/app/audit");
-    await expect(page.getByRole("heading", { level: 1, name: "Audit log" })).toBeVisible();
-    await page.getByLabel("Action").selectOption("patient");
-    await page.getByRole("button", { name: "Apply" }).click();
-    await expect(page).toHaveURL(/prefix=patient/);
-
-    const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name: "Download as CSV" }).click()]);
-    expect(download.suggestedFilename()).toMatch(/^audit-log-\d{4}-\d{2}-\d{2}\.csv$/);
-
-    await page.goto("/app/audit?prefix=export");
-    await expect(page.getByText("export.audit").first()).toBeVisible();
-    await ctx.close();
+  test.describe("psychologist: filter, page and download a CSV; the download is itself recorded", () => {
+    test.skip(!STAFF, "set E2E_STAFF_STATE"); // at describe level so no browser is started when the inputs are missing
+    test("psychologist: filter, page and download a CSV; the download is itself recorded", async ({ browser }) => {
+      const ctx = await browser.newContext({ storageState: STAFF });
+      const page = await ctx.newPage();
+      await page.goto("/app/audit");
+      await expect(page.getByRole("heading", { level: 1, name: "Audit log" })).toBeVisible();
+      await page.getByLabel("Action").selectOption("patient");
+      await page.getByRole("button", { name: "Apply" }).click();
+      await expect(page).toHaveURL(/prefix=patient/);
+  
+      const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name: "Download as CSV" }).click()]);
+      expect(download.suggestedFilename()).toMatch(/^audit-log-\d{4}-\d{2}-\d{2}\.csv$/);
+  
+      await page.goto("/app/audit?prefix=export");
+      await expect(page.getByText("export.audit").first()).toBeVisible();
+      await ctx.close();
+    });
   });
 
-  test("the admin and the bookkeeper get a 404 for the viewer and the export", async ({ browser }) => {
-    test.skip(!ADMIN && !BOOKKEEPER, "set E2E_ADMIN_STATE or E2E_BOOKKEEPER_STATE");
-    for (const state of [ADMIN, BOOKKEEPER]) {
-      if (!state) continue;
-      const ctx = await browser.newContext({ storageState: state });
-      const page = await ctx.newPage();
-      expect((await page.goto("/app/audit"))?.status()).toBe(404);
-      expect((await page.goto("/app/audit/export"))?.status()).toBe(404);
-      await ctx.close();
-    }
+  test.describe("the admin and the bookkeeper get a 404 for the viewer and the export", () => {
+    test.skip(!ADMIN && !BOOKKEEPER, "set E2E_ADMIN_STATE or E2E_BOOKKEEPER_STATE"); // at describe level so no browser is started when the inputs are missing
+    test("the admin and the bookkeeper get a 404 for the viewer and the export", async ({ browser }) => {
+      for (const state of [ADMIN, BOOKKEEPER]) {
+        if (!state) continue;
+        const ctx = await browser.newContext({ storageState: state });
+        const page = await ctx.newPage();
+        expect((await page.goto("/app/audit"))?.status()).toBe(404);
+        expect((await page.goto("/app/audit/export"))?.status()).toBe(404);
+        await ctx.close();
+      }
+    });
   });
 });
