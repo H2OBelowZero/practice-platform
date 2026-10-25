@@ -12,7 +12,32 @@ create table auth.users (
   aud text,
   role text,
   raw_user_meta_data jsonb,
-  email_confirmed_at timestamptz
+  email_confirmed_at timestamptz,
+  -- the columns the demo seed (supabase/seed.sql) writes, as in the real auth.users
+  encrypted_password text,
+  raw_app_meta_data jsonb,
+  created_at timestamptz,
+  updated_at timestamptz,
+  confirmation_token text,
+  recovery_token text,
+  email_change_token_new text,
+  email_change text,
+  email_change_token_current text,
+  phone_change text,
+  phone_change_token text,
+  reauthentication_token text
+);
+create table auth.identities (
+  id uuid primary key default gen_random_uuid(),
+  provider_id text not null,
+  user_id uuid not null references auth.users on delete cascade,
+  identity_data jsonb not null,
+  provider text not null,
+  last_sign_in_at timestamptz,
+  created_at timestamptz,
+  updated_at timestamptz,
+  email text generated always as (lower(identity_data ->> 'email')) stored,
+  unique (provider_id, provider)
 );
 create function auth.uid() returns uuid language sql stable as
 $$ select nullif(nullif(current_setting('request.jwt.claims', true), '')::json ->> 'sub', '')::uuid $$;
