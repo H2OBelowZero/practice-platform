@@ -4,31 +4,71 @@ import { join } from "node:path";
 import type { Client } from "pg";
 import { withClient, asUser } from "./helpers";
 
-// The whole of supabase/seed.sql is run (as `supabase db reset` does); its demo block (between "-- BEGIN demo data" and "-- END demo data") runs here as the owner, inside the usual
-// rolled-back transaction. It must not trip any billing / notes / status guard, must be a no-op on a configured database, and must give
-// patients only their own data.
-const seed = readFileSync(join(__dirname, "..", "..", "supabase", "seed.sql"), "utf8");
-const block = seed.slice(seed.indexOf("-- BEGIN demo data"), seed.indexOf("-- END demo data"));
+// supabase/seed.sql (form templates only) is run first, then supabase/seed-demo.sql with the explicit opt-in `set app.demo_seed = 'on'`, as the
+// README says, all inside the usual rolled-back transaction. The demo block must not trip any billing / notes / status guard, must do NOTHING
+// without the opt-in (even on an empty database), must be a no-op on a configured database, and must give patients only their own data.
+const root = join(__dirname, "..", "..", "supabase");
+const templates = readFileSync(join(root, "seed.sql"), "utf8");
+const demo = readFileSync(join(root, "seed-demo.sql"), "utf8");
+const configToml = readFileSync(join(root, "config.toml"), "utf8");
+const block = demo.slice(demo.indexOf("-- BEGIN demo data"), demo.indexOf("-- END demo data"));
 const U = { psy: "a0000000-0000-4000-8000-000000000001", adm: "a0000000-0000-4000-8000-000000000002", bk: "a0000000-0000-4000-8000-000000000003",
   ua: "a0000000-0000-4000-8000-000000000011", ub: "a0000000-0000-4000-8000-000000000012", ug: "a0000000-0000-4000-8000-000000000021" };
 const PA = "b0000000-0000-4000-8000-000000000011", PB = "b0000000-0000-4000-8000-000000000012", PM = "b0000000-0000-4000-8000-000000000014";
 
-async function run(c: Client): Promise<string[]> {
+async function run(c: Client, o: { optIn?: boolean; templates?: boolean } = {}): Promise<string[]> {
+  const { optIn = true, templates: withTemplates = true } = o;
   const notices: string[] = [];
   const on = (n: { message?: string }) => { notices.push(n.message ?? ""); };
   c.on("notice", on);
-  try { await c.query(seed); } finally { c.off("notice", on); } // the whole file, as `supabase db reset` runs it: templates first, then the demo block
+  try {
+    if (withTemplates) await c.query(templates);
+    if (optIn) await c.query("set app.demo_seed = 'on'");
+    await c.query(demo);
+  } finally { c.off("notice", on); }
   return notices;
 }
 const one = async (c: Client, sql: string, p: unknown[] = []) => (await c.query(sql, p)).rows[0];
 
-it("the block is delimited and carries the FICTIONAL / LOCAL-ONLY warning and the guard", () => {
+it("the demo file carries the NEVER-ON-PRODUCTION warning and every guard; seed.sql and config.toml know nothing of it", () => {
   expect(block.length).toBeGreaterThan(1000);
-  expect(block).toMatch(/FICTIONAL, LOCAL \/ STAGING ONLY/);
-  expect(block).toMatch(/PUBLIC KNOWLEDGE/);
+  expect(demo).toMatch(/NEVER RUN THIS ON PRODUCTION/);
+  expect(demo).toMatch(/PUBLIC KNOWLEDGE/);
+  expect(block).toMatch(/app\.demo_seed/);
   expect(block).toMatch(/from auth\.users/);
   expect(block).toMatch(/'My Practice'/);
+  // the file that `supabase db reset` loads holds no accounts at all, and the config never names the demo file
+  expect(templates).not.toMatch(/auth\.users|demo\.test|Demo-Passw0rd|crypt\(/);
+  expect(configToml).not.toMatch(/seed-demo/);
+  expect(configToml).toMatch(/sql_paths = \["\.\/seed\.sql"\]/);
+  // phones are obviously invalid and addresses are on the reserved .test domain
+  expect(block).not.toMatch(/\b0[6-8]\d[ -]?\d{3}[ -]?\d{4}\b/);
+  expect([...block.matchAll(/[\w.]+@[\w.]+/g)].every((m) => m[0].endsWith(".test"))).toBe(true);
 });
+
+it("does nothing without the explicit opt-in, even on a completely empty database (a brand-new production project looks like this)", () => withClient(async (c) => {
+  expect((await one(c, "select count(*)::int n from auth.users")).n).toBe(0);
+  const notices = await run(c, { optIn: false });
+  expect(notices.join("\n")).toMatch(/demo seed skipped: not opted in/);
+  expect((await one(c, "select count(*)::int n from auth.users")).n).toBe(0);
+  expect((await one(c, "select count(*)::int n from profiles where role <> 'patient'")).n).toBe(0);
+  expect((await one(c, "select name from practices")).name).toBe("My Practice");
+  await c.query("set app.demo_seed = 'yes'"); // any value other than 'on' is no opt-in either
+  await c.query(demo);
+  expect((await one(c, "select count(*)::int n from auth.users")).n).toBe(0);
+}));
+
+it("the form-template seed alone creates no account", () => withClient(async (c) => {
+  await c.query(templates);
+  expect((await one(c, "select count(*)::int n from auth.users")).n).toBe(0);
+  expect((await one(c, "select count(*)::int n from form_templates")).n).toBe(9);
+}));
+
+it("the demo file does nothing until the form templates exist", () => withClient(async (c) => {
+  const notices = await run(c, { templates: false });
+  expect(notices.join("\n")).toMatch(/load supabase\/seed\.sql/);
+  expect((await one(c, "select count(*)::int n from auth.users")).n).toBe(0);
+}));
 
 it("creates the accounts with the right roles, bcrypt passwords and email identities", () => withClient(async (c) => {
   await run(c);
@@ -69,7 +109,9 @@ it("creates the practice setup, patients, guardianship, appointments, forms, bil
     .toEqual({ status: "part_paid", total_cents: 95000, paid_cents: 40000, outstanding_cents: 55000 });
   expect(await one(c, "select method, reference, recorded_by from payments where invoice_id = 'c0000000-0000-4000-8000-000000000001'")).toEqual({ method: "eft", reference: "DEMO-EFT-0001", recorded_by: U.psy });
   // split invoice with a submitted claim: the invoice stays issued, the claim is submitted
-  expect(await one(c, "select status, scheme_portion_cents, patient_portion_cents from invoices where patient_id = $1", [PB])).toEqual({ status: "issued", scheme_portion_cents: 76000, patient_portion_cents: 19000 });
+  expect(await one(c, "select status, scheme_portion_cents, patient_portion_cents from invoices where patient_id = $1 and payer_type = 'split'", [PB])).toEqual({ status: "issued", scheme_portion_cents: 76000, patient_portion_cents: 19000 });
+  // a pure medical-aid invoice: the scheme owes everything, the patient nothing
+  expect(await one(c, "select status, scheme_portion_cents, patient_portion_cents, appointment_id from invoices where payer_type = 'medical_aid'")).toEqual({ status: "issued", scheme_portion_cents: 95000, patient_portion_cents: 0, appointment_id: null });
   const claim = await one(c, "select status, claimed_cents, icd10_codes, submitted_at is not null as stamped from claims");
   expect(claim).toEqual({ status: "submitted", claimed_cents: 76000, icd10_codes: ["F41.1"], stamped: true });
   expect((await one(c, "select count(*)::int n from claim_events where to_status = 'submitted'")).n).toBe(1);
@@ -80,8 +122,8 @@ it("creates the practice setup, patients, guardianship, appointments, forms, bil
   // retention defaults come from the migration, not from the seed
   expect((await one(c, "select count(*)::int n from retention_policies")).n).toBe(5);
   // every invoice number is distinct and the audit trail was written by the real paths
-  expect((await one(c, "select count(distinct number)::int n from invoices")).n).toBe(3);
-  expect((await one(c, "select count(*)::int n from audit_log where action in ('invoice.issue','payment.record','consent.grant','appointment.cancel')")).n).toBe(7);
+  expect((await one(c, "select count(distinct number)::int n from invoices")).n).toBe(4);
+  expect((await one(c, "select count(*)::int n from audit_log where action in ('invoice.issue','payment.record','consent.grant','appointment.cancel')")).n).toBe(8);
   // the seed leaves no impersonation behind
   expect((await one(c, "select auth.uid() as u")).u).toBeNull();
 }));
@@ -133,7 +175,7 @@ it("a seeded patient sees only their own data; the guardian sees the child; staf
   await asUser(c, U.adm, async () => { expect((await c.query("select 1 from clinical_notes")).rowCount).toBe(0); });
   await asUser(c, U.bk, async () => {
     expect((await c.query("select 1 from patients")).rowCount).toBe(0);
-    expect((await c.query("select 1 from invoices")).rowCount).toBe(3);
+    expect((await c.query("select 1 from invoices")).rowCount).toBe(4);
     expect((await c.query("select 1 from claims")).rowCount).toBe(0);
   });
   await asUser(c, U.psy, async () => { expect((await c.query("select 1 from clinical_notes")).rowCount).toBe(1); });

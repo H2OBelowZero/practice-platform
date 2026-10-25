@@ -3,9 +3,10 @@ import { TEMPLATES } from "./templates";
 export const SEED_HEADER = [
   "-- supabase/seed.sql",
   "-- FICTIONAL / DRAFT WORDING — to be reviewed by the practice and a legal advisor before live use",
-  "-- Local and staging only. Do not run against a live project until the wording has been reviewed.",
+  "-- Safe on every project (no accounts, no personal data), but the wording is a DRAFT: do not use it with real patients until it has been reviewed.",
+  "-- Demo accounts and data are NOT in this file: they are in supabase/seed-demo.sql, which is never run automatically.",
   "-- The form templates between the BEGIN/END markers are GENERATED from lib/forms/templates.ts: edit that file, then run",
-  "-- `UPDATE_SEED=1 npm run test:unit` (tests/unit/forms-templates.test.ts). Anything outside the markers (Task 17 adds demo data) is left alone.",
+  "-- `UPDATE_SEED=1 npm run test:unit` (tests/unit/forms-templates.test.ts). Anything outside the markers is left alone.",
   "-- Version 1 of every intake form and consent. Safe to run more than once (existing key + version rows are left alone).",
   "",
 ].join("\n");

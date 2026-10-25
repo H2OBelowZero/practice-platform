@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-// The seeded demo accounts (supabase/seed.sql, demo block) and the fixed ids the seed gives its rows.
+// The seeded demo accounts (supabase/seed-demo.sql) and the fixed ids the seed gives its rows.
 export const AUTH_DIR = join(__dirname, "..", ".auth");
 export const PASSWORD = process.env.E2E_PASSWORD || "Demo-Passw0rd-2026";
 
@@ -27,7 +27,7 @@ export const SEED = {
   patient: { a: "b0000000-0000-4000-8000-000000000011", b: "b0000000-0000-4000-8000-000000000012", c: "b0000000-0000-4000-8000-000000000013", minor: "b0000000-0000-4000-8000-000000000014" },
   user: { psychologist: "a0000000-0000-4000-8000-000000000001", guardian: "a0000000-0000-4000-8000-000000000021" },
   sessionType: { initial: "d0000000-0000-4000-8000-000000000001", followUp: "d0000000-0000-4000-8000-000000000002", video: "d0000000-0000-4000-8000-000000000003" },
-  invoice: { selfPartPaid: "c0000000-0000-4000-8000-000000000001", splitClaim: "c0000000-0000-4000-8000-000000000002", minor: "c0000000-0000-4000-8000-000000000003" },
+  invoice: { selfPartPaid: "c0000000-0000-4000-8000-000000000001", splitClaim: "c0000000-0000-4000-8000-000000000002", minor: "c0000000-0000-4000-8000-000000000003", medicalAidOnly: "c0000000-0000-4000-8000-000000000004" },
   appointment: { pastA: "e0000000-0000-4000-8000-000000000001", futureA: "e0000000-0000-4000-8000-000000000004", requestC: "e0000000-0000-4000-8000-000000000005" },
   note: "80000000-0000-4000-8000-000000000001",
 } as const;
