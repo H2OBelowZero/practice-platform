@@ -174,9 +174,9 @@ describe("providers and quiet runs", () => {
 
 describe("wiring", () => {
   const root = join(__dirname, "..", "..");
-  it("vercel.json schedules the route every 15 minutes", () => {
+  it("vercel.json schedules the route once a day at 04:00 UTC (06:00 SAST; Vercel Hobby allows daily crons only)", () => {
     const cfg = JSON.parse(readFileSync(join(root, "vercel.json"), "utf8"));
-    expect(cfg.crons).toEqual([{ path: "/api/cron/reminders", schedule: "*/15 * * * *" }]);
+    expect(cfg.crons).toEqual([{ path: "/api/cron/reminders", schedule: "0 4 * * *" }]);
   });
   it("middleware does not run for /api/cron/ (no session, no Auth round trip), like /api/payfast/", () => {
     const src = readFileSync(join(root, "middleware.ts"), "utf8");

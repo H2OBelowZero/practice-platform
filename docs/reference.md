@@ -186,7 +186,7 @@ reminders are not active yet". A patient's email address and phone number can on
 practice, so a written operator agreement under section 21 of POPIA must be signed with it, and where its servers are (cross-border transfer, section 72)
 recorded, before live use. Keep message content as neutral as it is now.
 
-**Schedule**: `vercel.json` runs the route every 15 minutes (`*/15 * * * *`). **Vercel's Hobby plan only allows cron jobs that run once a day**
+**Schedule**: `vercel.json` runs the route once a day at 04:00 UTC (06:00 SAST, `0 4 * * *`), because the project is on Vercel Hobby. For 15-minute reminders switch to `*/15 * * * *` on the **Pro** plan, or keep daily and call the endpoint every 15 minutes from an external scheduler (below). **Vercel's Hobby plan only allows cron jobs that run once a day**
 (and a deployment with a more frequent schedule is refused), so 15 minute reminders need the **Pro** plan. On Hobby, either change the schedule to daily (reminders
 then go out once a day, and an appointment can fall between two runs), or leave the cron entry out and call the endpoint from an external scheduler:
 
