@@ -43,7 +43,7 @@ export async function FormsTab({ patient, role, sb }: TabContext) {
 
   return (
     <div className="grid gap-8">
-      {admin && <Notice tone="info">The health history form is visible to the psychologist only. You will not see it listed here, and you cannot request it.</Notice>}
+      {admin && <Notice tone="info">The health history and &quot;What brings you to therapy&quot; forms are visible to the psychologist only. You will not see them listed here, and you cannot request them.</Notice>}
 
       <section aria-labelledby="subs-h">
         <h3 id="subs-h" className="mb-3 text-lg">Forms</h3>

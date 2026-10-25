@@ -265,10 +265,10 @@ describe("access and notices", () => {
 });
 
 describe("restricted flag", () => {
-  it("only the health history is restricted; the schema check accepts a boolean and rejects anything else", () => {
-    expect(TEMPLATES.filter((t) => t.schema.restricted).map((t) => t.key)).toEqual(["medical_history"]);
+  it("only the health history and presenting concerns are restricted; the schema check accepts a boolean and rejects anything else", () => {
+    expect(TEMPLATES.filter((t) => t.schema.restricted).map((t) => t.key)).toEqual(["medical_history", "presenting_concerns"]);
     // every version of a restricted key carries the flag, and nothing else does (the database also inherits it for later versions)
-    expect([...RESTRICTED_KEYS]).toEqual(["medical_history"]);
+    expect([...RESTRICTED_KEYS]).toEqual(["medical_history", "presenting_concerns"]);
     for (const t of TEMPLATES) expect(t.schema.restricted === true, t.key).toBe(RESTRICTED_KEYS.includes(t.key));
     expect(checkSchema({ restricted: true, fields: [{ key: "a", label: "A", type: "text" }] })).toEqual([]);
     expect(checkSchema({ restricted: "yes", fields: [{ key: "a", label: "A", type: "text" }] })).toEqual(["restricted must be true or false"]);

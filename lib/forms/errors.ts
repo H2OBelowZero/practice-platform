@@ -16,6 +16,7 @@ export function formErrorText(message: string | undefined | null): string {
   if (/submission_not_open|immutable|invalid_status_transition/.test(m)) return FORM_ERROR.closed;
   if (/forbidden|row-level security|permission denied/.test(m)) return FORM_ERROR.forbidden;
   if (/consent_required_missing|consent_answer_mismatch|consent_not_in_template|duplicate_consent_purpose/.test(m)) return "Please check the consent boxes on this form and try again.";
+  if (/required_field_missing|invalid_field_value/.test(m)) return "Please answer every required question with one of the choices offered, then try again.";
   if (/answers_too_large/.test(m)) return "Your answers are too long to save. Please shorten them and try again.";
   if (/template_not_active/.test(m)) return "This form is no longer available. Please contact the practice.";
   return FORM_ERROR.generic;

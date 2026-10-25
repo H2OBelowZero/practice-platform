@@ -62,7 +62,7 @@ it("does nothing without the explicit opt-in, even on a completely empty databas
 it("the form-template seed alone creates no account", () => withClient(async (c) => {
   await c.query(templates);
   expect((await one(c, "select count(*)::int n from auth.users")).n).toBe(0);
-  expect((await one(c, "select count(*)::int n from form_templates")).n).toBe(9);
+  expect((await one(c, "select count(*)::int n from form_templates")).n).toBe(12); // 9 version 1 templates + registration v2, guardian_info v2, presenting_concerns v1 (final review I5)
 }));
 
 it("the demo file does nothing until the form templates exist", () => withClient(async (c) => {

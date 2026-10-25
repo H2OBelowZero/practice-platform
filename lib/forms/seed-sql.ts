@@ -7,7 +7,7 @@ export const SEED_HEADER = [
   "-- Demo accounts and data are NOT in this file: they are in supabase/seed-demo.sql, which is never run automatically.",
   "-- The form templates between the BEGIN/END markers are GENERATED from lib/forms/templates.ts: edit that file, then run",
   "-- `UPDATE_SEED=1 npm run test:unit` (tests/unit/forms-templates.test.ts). Anything outside the markers is left alone.",
-  "-- Version 1 of every intake form and consent. Safe to run more than once (existing key + version rows are left alone).",
+  "-- Every published version of each intake form and consent (older versions stay for history). Safe to run more than once (existing key + version rows are left alone).",
   "",
 ].join("\n");
 

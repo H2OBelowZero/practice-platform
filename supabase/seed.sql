@@ -4,7 +4,7 @@
 -- Demo accounts and data are NOT in this file: they are in supabase/seed-demo.sql, which is never run automatically.
 -- The form templates between the BEGIN/END markers are GENERATED from lib/forms/templates.ts: edit that file, then run
 -- `UPDATE_SEED=1 npm run test:unit` (tests/unit/forms-templates.test.ts). Anything outside the markers is left alone.
--- Version 1 of every intake form and consent. Safe to run more than once (existing key + version rows are left alone).
+-- Every published version of each intake form and consent (older versions stay for history). Safe to run more than once (existing key + version rows are left alone).
 
 -- BEGIN generated form templates
 insert into form_templates(key, version, schema) values ('registration', 1, $tpl${
@@ -467,6 +467,180 @@ insert into form_templates(key, version, schema) values ('share_with_insurer', 1
       "type": "checkbox",
       "consentPurpose": "share_insurer",
       "help": "Leave this unticked if you do not want us to share anything."
+    }
+  ]
+}$tpl$::jsonb)
+on conflict (key, version) do nothing;
+
+insert into form_templates(key, version, schema) values ('registration', 2, $tpl${
+  "title": "Registration",
+  "intro": "Please tell us a little about yourself so that we can set up your file.\n\nOnly the items marked required must be answered. You can leave the rest for your first session if you prefer.",
+  "fields": [
+    {
+      "key": "preferred_name",
+      "label": "What name would you like us to use?",
+      "type": "text",
+      "help": "If it is different from your name on the booking."
+    },
+    {
+      "key": "pronouns",
+      "label": "Your pronouns",
+      "type": "text",
+      "help": "Optional."
+    },
+    {
+      "key": "contact_preference",
+      "label": "How do you prefer to be contacted?",
+      "type": "select",
+      "required": true,
+      "options": [
+        "Email",
+        "SMS or WhatsApp message",
+        "Phone call"
+      ]
+    },
+    {
+      "key": "safe_to_leave_message",
+      "label": "Is it safe for us to leave a voicemail or message on your phone?",
+      "type": "select",
+      "required": true,
+      "options": [
+        "Yes",
+        "No, please do not leave messages"
+      ]
+    },
+    {
+      "key": "home_address",
+      "label": "Home address",
+      "type": "textarea",
+      "help": "Used for your account and, for online sessions, in an emergency."
+    },
+    {
+      "key": "occupation",
+      "label": "Occupation or school",
+      "type": "text"
+    },
+    {
+      "key": "previous_therapy",
+      "label": "Have you seen a psychologist, counsellor or psychiatrist before?",
+      "type": "select",
+      "required": true,
+      "options": [
+        "No",
+        "Yes"
+      ]
+    },
+    {
+      "key": "how_heard",
+      "label": "How did you hear about the practice?",
+      "type": "text"
+    },
+    {
+      "key": "gp_name",
+      "label": "Name of your GP or other doctor",
+      "type": "text",
+      "help": "Optional. We will only contact them if you give us permission."
+    },
+    {
+      "key": "emergency_name",
+      "label": "Emergency contact: full name",
+      "type": "text",
+      "required": true,
+      "help": "Someone we may contact if we are worried about your safety."
+    },
+    {
+      "key": "emergency_phone",
+      "label": "Emergency contact: phone number",
+      "type": "text",
+      "required": true
+    },
+    {
+      "key": "emergency_relationship",
+      "label": "Emergency contact: how are they related to you?",
+      "type": "text",
+      "required": true
+    }
+  ]
+}$tpl$::jsonb)
+on conflict (key, version) do nothing;
+
+insert into form_templates(key, version, schema) values ('guardian_info', 2, $tpl${
+  "title": "Parent or guardian information",
+  "intro": "Please complete this form if you are the parent or legal guardian of a child or young person who will be seeing us.\n\nChildren's information is kept confidential too. We will talk with you about what your child is comfortable sharing, and what we need to share with you, so that your child can feel safe in therapy.",
+  "fields": [
+    {
+      "key": "guardian_name",
+      "label": "Your full name",
+      "type": "text",
+      "required": true
+    },
+    {
+      "key": "relationship",
+      "label": "Your relationship to the child",
+      "type": "select",
+      "required": true,
+      "options": [
+        "Mother",
+        "Father",
+        "Legal guardian",
+        "Other"
+      ]
+    },
+    {
+      "key": "relationship_other",
+      "label": "If other, please describe",
+      "type": "text"
+    },
+    {
+      "key": "guardian_phone",
+      "label": "Your phone number",
+      "type": "text",
+      "required": true
+    },
+    {
+      "key": "guardian_email",
+      "label": "Your email address",
+      "type": "text",
+      "required": true
+    },
+    {
+      "key": "has_authority",
+      "label": "I have the legal authority to consent to my child's treatment, for example parental responsibilities and rights or a court order.",
+      "type": "checkbox",
+      "required": true
+    },
+    {
+      "key": "other_guardian",
+      "label": "Other person with parental responsibilities, if any (name and contact details)",
+      "type": "textarea"
+    }
+  ]
+}$tpl$::jsonb)
+on conflict (key, version) do nothing;
+
+insert into form_templates(key, version, schema) values ('presenting_concerns', 1, $tpl${
+  "title": "What brings you to therapy",
+  "restricted": true,
+  "intro": "These questions are for your psychologist only. Only the psychologist can read your answers; the practice's reception and bookkeeping staff cannot.\n\nIf you are completing this for a child, answer about the child.\n\nIf you are in crisis, call SADAG on 0800 567 567 or go to the nearest emergency room. This form is not monitored in real time.",
+  "fields": [
+    {
+      "key": "reason_for_visit",
+      "label": "What brings you (or your child) to therapy at this time?",
+      "type": "textarea",
+      "required": true,
+      "help": "A few sentences is plenty. You can say more in the first session."
+    },
+    {
+      "key": "child_concerns",
+      "label": "For a child: what are you most concerned about, and what would you like to change?",
+      "type": "textarea",
+      "help": "Only if this form is about a child."
+    },
+    {
+      "key": "court_orders",
+      "label": "For a child: any court orders or parenting plans that affect consent, contact or access to information",
+      "type": "textarea",
+      "help": "Only if this form is about a child. Describe them, or write \"none\"."
     }
   ]
 }$tpl$::jsonb)

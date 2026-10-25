@@ -168,8 +168,29 @@ const shareWithInsurer: FormSchema = {
   ],
 };
 
-/** Template keys whose submissions only the psychologist may read (clinical history). Every version of these must carry `restricted: true` (a unit test checks it; the database also inherits the flag). */
-export const RESTRICTED_KEYS: readonly string[] = ["medical_history"];
+// ---- version 2 of registration and guardian_info (final review I5) ---------------------------------------------------------------------------
+// The admin (receptionist) may read registration and guardian_info answers, so the clinical questions moved out of them into the RESTRICTED
+// presenting_concerns form (psychologist only, like the health history). Version 1 stays for history: submissions record their version, and a used
+// version is never edited (0004 ft_guard). New requests use the newest version of each key (lib/forms/access latestPerKey).
+const CLINICAL_KEYS = new Set(["reason_for_visit", "court_orders", "child_concerns"]);
+const withoutClinical = (s: FormSchema): FormSchema => ({ ...s, fields: s.fields.filter((f) => !CLINICAL_KEYS.has(f.key)) });
+
+const presentingConcerns: FormSchema = {
+  title: "What brings you to therapy",
+  restricted: true, // clinical: psychologist only (the admin cannot read these submissions, see 0012_form_submit.sql)
+  intro:
+    "These questions are for your psychologist only. Only the psychologist can read your answers; the practice's reception and bookkeeping staff cannot.\n\n" +
+    "If you are completing this for a child, answer about the child.\n\n" +
+    CRISIS,
+  fields: [
+    { key: "reason_for_visit", label: "What brings you (or your child) to therapy at this time?", type: "textarea", required: true, help: "A few sentences is plenty. You can say more in the first session." },
+    { key: "child_concerns", label: "For a child: what are you most concerned about, and what would you like to change?", type: "textarea", help: "Only if this form is about a child." },
+    { key: "court_orders", label: "For a child: any court orders or parenting plans that affect consent, contact or access to information", type: "textarea", help: "Only if this form is about a child. Describe them, or write \"none\"." },
+  ],
+};
+
+/** Template keys whose submissions only the psychologist may read (clinical). Every version of these must carry `restricted: true` (a unit test checks it; the database also inherits the flag). */
+export const RESTRICTED_KEYS: readonly string[] = ["medical_history", "presenting_concerns"];
 
 export const TEMPLATES: SeedTemplate[] = [
   { key: "registration", version: 1, schema: registration },
@@ -181,4 +202,7 @@ export const TEMPLATES: SeedTemplate[] = [
   { key: "guardian_info", version: 1, schema: guardianInfo },
   { key: "share_with_referrer", version: 1, schema: withDraft(shareWithReferrer) },
   { key: "share_with_insurer", version: 1, schema: withDraft(shareWithInsurer) },
+  { key: "registration", version: 2, schema: withoutClinical(registration) },
+  { key: "guardian_info", version: 2, schema: withoutClinical(guardianInfo) },
+  { key: "presenting_concerns", version: 1, schema: presentingConcerns },
 ];

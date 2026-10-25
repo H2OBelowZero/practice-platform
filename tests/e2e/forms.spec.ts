@@ -37,13 +37,13 @@ test.describe("forms and consent", () => {
     await patient.getByRole("link", { name: "Registration" }).first().click();
     await expect(patient.getByRole("heading", { level: 1, name: "Registration" })).toBeVisible();
 
-    await patient.getByLabel(/What brings you to therapy/).fill("Feeling stuck at work");
+    await patient.getByLabel("Occupation or school").fill("Teacher");
     await expect(patient.getByRole("status").filter({ hasText: /Saved at \d\d:\d\d/ })).toBeVisible({ timeout: 10_000 }); // autosave after 1.5 s
 
     // 3. leave and come back: the answer is still there (resume)
     await patient.goto("/portal/documents");
     await patient.getByRole("link", { name: "Registration" }).first().click();
-    await expect(patient.getByLabel(/What brings you to therapy/)).toHaveValue("Feeling stuck at work");
+    await expect(patient.getByLabel("Occupation or school")).toHaveValue("Teacher");
 
     // 4. submitting with required fields missing shows a message per field and focuses the first
     await patient.getByRole("button", { name: "Submit" }).click();
@@ -67,7 +67,7 @@ test.describe("forms and consent", () => {
     // 6. staff read it (read-only, by field label) and return it with a note
     await staff.goto(`/app/patients/${RECORD}?tab=forms`);
     await staff.getByRole("link", { name: /View Registration/ }).first().click();
-    await expect(staff.getByText("Feeling stuck at work")).toBeVisible();
+    await expect(staff.getByText("Teacher", { exact: true })).toBeVisible(); // registration v2 (I5): the clinical question moved to the restricted presenting_concerns form
     await expect(staff.getByRole("heading", { name: "Submission history" })).toBeVisible();
     await staff.getByRole("link", { name: "Return for correction…" }).click();
     await staff.getByLabel("What needs to change?").fill("Please add a phone number we can reach you on during the day.");
@@ -78,7 +78,7 @@ test.describe("forms and consent", () => {
     await patient.goto("/portal/documents");
     await expect(patient.getByText("Please add a phone number we can reach you on during the day.")).toBeVisible();
     await patient.getByRole("link", { name: /Update and resubmit|Update Registration/ }).first().click();
-    await patient.getByLabel(/What brings you to therapy/).fill("Feeling stuck at work and at home");
+    await patient.getByLabel("Occupation or school").fill("Teacher and part-time student");
     await patient.getByRole("button", { name: "Submit" }).click();
     await patient.waitForURL(/\/portal\/documents\?notice=submitted/);
 
