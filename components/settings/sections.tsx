@@ -272,7 +272,7 @@ export function InformationSection({ templates, staff, status, cron, cronVisible
         <p className="mb-3 text-ink-muted">Yes or no only. Keys and passwords are set in the hosting environment and are never shown here.</p>
         <dl>
           <Row label="Email provider"><Flag on={status.email.configured} yes={`Configured (${status.email.provider})`} no={status.email.provider === "console" ? "Not configured: emails are only logged, nothing is delivered" : "Not configured: no email is sent, messages wait in the queue"} /></Row>
-          <Row label="SMS provider"><Flag on={status.sms.active} yes="Switched on" no="Inactive in Phase 1" /></Row>
+          <Row label="SMS provider"><Flag on={status.sms.active && status.sms.provider !== "none"} yes="Switched on (console only: messages are logged, nothing is delivered)" no={status.sms.active ? "Switched on, but there is no SMS provider: no SMS is sent" : "Inactive in Phase 1"} /></Row>
           <Row label="PayFast"><Flag on={status.payfast.configured} yes={`Configured, ${status.payfast.mode === "sandbox" ? "sandbox (test payments)" : "live"}`} no="Not configured: patients cannot pay online" /></Row>
           <Row label="PayFast passphrase"><Flag on={status.payfast.passphraseSet} /></Row>
           <Row label="PayFast notify path">{PAYFAST_NOTIFY_PATH} <span className="text-sm text-ink-muted">(PayFast needs the app address followed by this path)</span></Row>

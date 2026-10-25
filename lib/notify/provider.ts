@@ -63,6 +63,15 @@ export class ResendEmailProvider implements Provider {
  */
 export const smsActive = (env: NodeJS.ProcessEnv = process.env): boolean => env.SMS_ACTIVE === "true";
 
+export type SmsProviderName = "console" | "none";
+
+/**
+ * Which SMS provider is usable. Phase 1 has no real one, so: "console" outside production (local runs log that a message would have gone; nothing is
+ * delivered) and "none" in production. With "none" the worker neither queues nor claims SMS rows even when SMS_ACTIVE is true, so no row is ever marked
+ * 'sent' for a message nobody received (the same rule as email without a provider). Wiring a real provider means changing this function and getProvider.
+ */
+export const smsProviderName = (env: NodeJS.ProcessEnv = process.env): SmsProviderName => (env.NODE_ENV === "production" ? "none" : "console");
+
 export type EmailProviderName = "resend" | "console" | "none";
 
 /**
@@ -84,6 +93,9 @@ export function getProvider(channel: Channel, env: NodeJS.ProcessEnv = process.e
     const name = emailProviderName(env);
     if (name === "none") throw new ProviderError("provider_not_configured");
     if (name === "resend") return new ResendEmailProvider(env.EMAIL_API_KEY!.trim(), env.EMAIL_FROM!.trim());
+    return new ConsoleProvider();
   }
+  // SMS and push: the console provider delivers nothing, so it is never used in production (a send there would mark a row 'sent' that nobody received)
+  if (smsProviderName(env) === "none") throw new ProviderError("provider_not_configured");
   return new ConsoleProvider();
 }

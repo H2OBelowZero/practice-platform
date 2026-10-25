@@ -144,7 +144,7 @@ describe("integration status", () => {
   it("reports yes/no answers and the Supabase host, and no value appears anywhere in the result", () => {
     const s = integrationStatus(SECRETS);
     expect(s).toEqual({
-      email: { configured: true, provider: "resend" }, sms: { active: false },
+      email: { configured: true, provider: "resend" }, sms: { active: false, provider: "none" },
       payfast: { configured: true, mode: "sandbox", passphraseSet: true, merchantSet: true }, cronSecretSet: true, appUrlSet: true, supabaseHost: "abcdefgh.supabase.co",
     });
     const text = JSON.stringify(s);
@@ -154,12 +154,15 @@ describe("integration status", () => {
   it("says what is missing", () => {
     const s = integrationStatus({ NODE_ENV: "production" });
     expect(s).toEqual({
-      email: { configured: false, provider: "none" }, sms: { active: false },
+      email: { configured: false, provider: "none" }, sms: { active: false, provider: "none" },
       payfast: { configured: false, mode: "live", passphraseSet: false, merchantSet: false }, cronSecretSet: false, appUrlSet: false, supabaseHost: null,
     });
     expect(integrationStatus({ EMAIL_API_KEY: "k", NODE_ENV: "production" }).email).toEqual({ configured: false, provider: "none" }); // a key without a sender is not configured
     expect(integrationStatus({ NODE_ENV: "development" }).email).toEqual({ configured: false, provider: "console" });
     expect(integrationStatus({ SMS_ACTIVE: "true" }).sms.active).toBe(true);
+    // SMS switched on in production has no provider to send through in Phase 1 (the worker then neither queues nor claims SMS rows)
+    expect(integrationStatus({ SMS_ACTIVE: "true", NODE_ENV: "production" }).sms).toEqual({ active: true, provider: "none" });
+    expect(integrationStatus({ SMS_ACTIVE: "true", NODE_ENV: "development" }).sms).toEqual({ active: true, provider: "console" });
     expect(integrationStatus({ PAYFAST_MERCHANT_ID: "1", PAYFAST_MERCHANT_KEY: "k", PAYFAST_SANDBOX: "true" }).payfast).toMatchObject({ configured: true, passphraseSet: false, mode: "sandbox" });
     expect(integrationStatus({ PAYFAST_MERCHANT_ID: "1", PAYFAST_MERCHANT_KEY: "k" }).payfast.configured).toBe(false); // live needs a passphrase
   });

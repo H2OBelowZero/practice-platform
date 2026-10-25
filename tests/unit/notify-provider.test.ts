@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { ConsoleProvider, ProviderError, ResendEmailProvider, emailProviderName, getProvider, smsActive } from "@/lib/notify/provider";
+import { ConsoleProvider, ProviderError, ResendEmailProvider, emailProviderName, getProvider, smsActive, smsProviderName } from "@/lib/notify/provider";
 
 const MSG = { subject: "Appointment reminder", text: "You have an appointment on Mon 7 Jan 2030 at 08:00.", html: "<p>hi</p>" };
 const TO = "jane.private@example.test";
@@ -104,11 +104,16 @@ describe("getProvider", () => {
       }
     }
   });
-  it("SMS and push are always the console in Phase 1, even with email configured", () => {
+  it("SMS and push use the console outside production only; in production there is no SMS provider in Phase 1, so a send fails instead of pretending", () => {
     const e = env({ EMAIL_API_KEY: "k", EMAIL_FROM: "bookings@example.test", NODE_ENV: "production" });
-    expect(getProvider("sms", e)).toBeInstanceOf(ConsoleProvider);
-    expect(getProvider("push", e)).toBeInstanceOf(ConsoleProvider);
-    expect(getProvider("sms", env({ NODE_ENV: "production" }))).toBeInstanceOf(ConsoleProvider);
+    for (const ch of ["sms", "push"] as const) {
+      expect(() => getProvider(ch, e), ch).toThrow(ProviderError);
+      expect(() => getProvider(ch, env({ NODE_ENV: "production" })), ch).toThrow("provider_not_configured");
+      for (const NODE_ENV of ["development", "test"]) expect(getProvider(ch, env({ NODE_ENV })), `${ch} ${NODE_ENV}`).toBeInstanceOf(ConsoleProvider);
+    }
+    expect(getProvider("email", e)).toBeInstanceOf(ResendEmailProvider); // email is unaffected
+    expect(smsProviderName(env({ NODE_ENV: "production", SMS_ACTIVE: "true" }))).toBe("none");
+    expect(smsProviderName(env({ NODE_ENV: "development" }))).toBe("console");
   });
   it("SMS is active only for SMS_ACTIVE exactly 'true'", () => {
     expect(smsActive(env({ SMS_ACTIVE: "true" }))).toBe(true);

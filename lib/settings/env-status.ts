@@ -1,4 +1,4 @@
-import { emailProviderName, smsActive, type EmailProviderName } from "@/lib/notify/provider";
+import { emailProviderName, smsActive, smsProviderName, type EmailProviderName, type SmsProviderName } from "@/lib/notify/provider";
 import { payfastAvailable } from "@/lib/payments/payfast";
 
 /**
@@ -8,7 +8,7 @@ import { payfastAvailable } from "@/lib/payments/payfast";
  */
 export type IntegrationStatus = {
   email: { configured: boolean; provider: EmailProviderName };
-  sms: { active: boolean };
+  sms: { active: boolean; provider: SmsProviderName };
   payfast: { configured: boolean; mode: "sandbox" | "live"; passphraseSet: boolean; merchantSet: boolean };
   cronSecretSet: boolean;
   appUrlSet: boolean;
@@ -29,7 +29,7 @@ export function integrationStatus(env: Env = process.env): IntegrationStatus {
   const provider = emailProviderName(env as NodeJS.ProcessEnv);
   return {
     email: { configured: provider === "resend", provider },
-    sms: { active: smsActive(env as NodeJS.ProcessEnv) },
+    sms: { active: smsActive(env as NodeJS.ProcessEnv), provider: smsProviderName(env as NodeJS.ProcessEnv) },
     payfast: {
       configured: payfastAvailable(env),
       mode: env.PAYFAST_SANDBOX === "true" ? "sandbox" : "live",

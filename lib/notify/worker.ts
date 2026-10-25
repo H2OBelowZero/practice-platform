@@ -1,4 +1,4 @@
-import { getProvider, emailProviderName, smsActive, ProviderError, type Channel, type EmailProviderName, type Provider } from "./provider";
+import { getProvider, emailProviderName, smsActive, smsProviderName, ProviderError, type Channel, type EmailProviderName, type Provider, type SmsProviderName } from "./provider";
 import { renderTemplate, TemplateError } from "./templates";
 
 /**
@@ -7,14 +7,15 @@ import { renderTemplate, TemplateError } from "./templates";
  * send it and record the outcome. Everything it returns or logs is a count or a short code: never a recipient, a subject, a body or a provider reply.
  *
  * Nothing is claimed for a channel that cannot really be sent: with no email provider configured (production without EMAIL_API_KEY / EMAIL_FROM) email
- * rows stay pending, and while SMS is switched off no SMS row is queued or claimed. claim_outbox expires rows that went stale in the meantime.
+ * rows stay pending, and while SMS is switched off, or switched on without an SMS provider (production in Phase 1), no SMS row is queued or claimed.
+ * claim_outbox expires rows that went stale in the meantime.
  */
 export type OutboxRow = { id: number; channel: Channel; template: string; recipient: string; payload: unknown; attempts: number };
 export type RpcResult = { data: unknown; error: { code: string } | null };
 export type Rpc = (fn: string, args?: Record<string, unknown>) => Promise<RpcResult>;
 export type WorkerDeps = {
   rpc: Rpc; provider?: (channel: Channel) => Provider; now?: () => number; budgetMs?: number;
-  emailProvider?: EmailProviderName; smsActive?: boolean;
+  emailProvider?: EmailProviderName; smsActive?: boolean; smsProvider?: SmsProviderName;
 };
 
 export const BATCH_SIZE = 25;
@@ -29,6 +30,8 @@ export type RunResult = {
   emailProvider: EmailProviderName;
   /** set when email rows were left untouched because no email provider is configured */
   skipped?: "provider_not_configured";
+  /** set when SMS_ACTIVE is true but there is no SMS provider (production in Phase 1): SMS rows are neither queued nor claimed */
+  smsSkipped?: "provider_not_configured";
   errors: string[];
 };
 
@@ -51,7 +54,9 @@ export async function runWorker(deps: WorkerDeps): Promise<RunResult> {
   const providerFor = deps.provider ?? ((c: Channel) => getProvider(c));
   const budget = deps.budgetMs ?? BUDGET_MS;
   const emailName = deps.emailProvider ?? emailProviderName();
-  const sms = deps.smsActive ?? smsActive();
+  // SMS goes out only when it is switched on AND a provider can really send it; in production Phase 1 has none (the console provider delivers nothing)
+  const smsOn = deps.smsActive ?? smsActive();
+  const sms = smsOn && (deps.smsProvider ?? smsProviderName()) !== "none";
   const started = now();
   const out: RunResult = { ok: true, reminders: 0, overdueTasks: 0, claimed: 0, sent: 0, retried: 0, failed: 0, deferred: 0, emailProvider: emailName, errors: [] };
   const fail = (what: string, code: string) => { out.errors.push(`${what}:${code}`); };
@@ -63,7 +68,7 @@ export async function runWorker(deps: WorkerDeps): Promise<RunResult> {
 
   const channels: Channel[] = [];
   if (emailName !== "none") channels.push("email"); else { out.skipped = "provider_not_configured"; console.log("[notify] no email provider configured: email rows left pending"); }
-  if (sms) channels.push("sms");
+  if (sms) channels.push("sms"); else if (smsOn) { out.smsSkipped = "provider_not_configured"; console.log("[notify] SMS is switched on but no SMS provider is configured: no SMS rows queued or claimed"); }
 
   const finish = async (id: number, ok: boolean, code: string | null) => {
     const r = await deps.rpc("finish_outbox", { p_id: id, p_ok: ok, p_error: code });

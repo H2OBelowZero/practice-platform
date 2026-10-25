@@ -451,3 +451,15 @@ describe("fix round 1: wording and keys", () => {
     expect(h.log).toEqual([]);
   });
 });
+
+describe("connections panel: SMS (final review, before go-live)", () => {
+  it("says plainly when SMS is switched on but there is no provider to send through", async () => {
+    const { InformationSection } = await import("@/components/settings/sections");
+    const { integrationStatus } = await import("@/lib/settings/env-status");
+    const html = (env: Record<string, string>) =>
+      renderToStaticMarkup(<InformationSection templates={[]} staff={[]} status={integrationStatus(env)} cron={null} cronVisible={false} failedNotifications={null} />);
+    expect(html({ SMS_ACTIVE: "true", NODE_ENV: "production" })).toContain("Switched on, but there is no SMS provider: no SMS is sent");
+    expect(html({ SMS_ACTIVE: "true", NODE_ENV: "development" })).toContain("Switched on (console only: messages are logged, nothing is delivered)");
+    expect(html({ NODE_ENV: "production" })).toContain("Inactive in Phase 1");
+  });
+});

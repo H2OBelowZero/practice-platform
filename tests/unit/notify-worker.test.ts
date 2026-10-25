@@ -150,6 +150,25 @@ describe("runWorker", () => {
     expect(r.skipped).toBe("provider_not_configured");
   });
 
+  it("SMS switched on without an SMS provider (production, Phase 1): no SMS row is queued or claimed, so none is ever marked sent", async () => {
+    const db = fakeDb([[]]);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const r = await runWorker({ rpc: db.rpc, emailProvider: "resend", smsActive: true, smsProvider: "none" });
+    expect(db.calls[0].args).toEqual({ p_sms: false });
+    expect(db.calls.find((c) => c.fn === "claim_outbox")!.args).toEqual({ p_limit: BATCH_SIZE, p_channels: ["email"] });
+    expect(r.smsSkipped).toBe("provider_not_configured");
+    expect(log.mock.calls).toContainEqual(["[notify] SMS is switched on but no SMS provider is configured: no SMS rows queued or claimed"]);
+    // and with no email provider either, nothing at all is claimed
+    const none = fakeDb([[]]);
+    const r2 = await runWorker({ rpc: none.rpc, emailProvider: "none", smsActive: true, smsProvider: "none" });
+    expect(none.calls.map((c) => c.fn)).toEqual(["enqueue_reminders", "enqueue_overdue_tasks"]);
+    expect(r2).toMatchObject({ skipped: "provider_not_configured", smsSkipped: "provider_not_configured", claimed: 0, sent: 0 });
+    // a usable provider (outside production) keeps the old behaviour
+    const ok = fakeDb([[]]);
+    await runWorker({ rpc: ok.rpc, emailProvider: "resend", smsActive: true, smsProvider: "console" });
+    expect(ok.calls.find((c) => c.fn === "claim_outbox")!.args).toEqual({ p_limit: BATCH_SIZE, p_channels: ["email", "sms"] });
+  });
+
   it("somethingHappened: false for a quiet run, true for any count or error", () => {
     const quiet: RunResult = { ok: true, reminders: 0, overdueTasks: 0, claimed: 0, sent: 0, retried: 0, failed: 0, deferred: 0, emailProvider: "resend", errors: [] };
     expect(somethingHappened(quiet)).toBe(false);
