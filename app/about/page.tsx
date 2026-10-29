@@ -2,7 +2,7 @@ import { SITE } from "@/lib/site";
 import { JsonLd } from "@/components/site/json-ld";
 import { breadcrumbSchema, pageMeta } from "@/lib/seo";
 import { SiteShell } from "@/components/site/site-shell";
-import { CtaBand, PageIntro, Placeholder } from "@/components/site/parts";
+import { CtaBand, PageIntro, Portrait } from "@/components/site/parts";
 import { LinkButton } from "@/components/ui/button";
 
 export const metadata = pageMeta("/about", "About your psychologist in Randburg, Johannesburg", "Meet a registered clinical psychologist working with adults in Randburg, Johannesburg and Sandton, and learn how trauma-informed therapy here works.");
@@ -27,7 +27,7 @@ export default function About() {
     <SiteShell>
       <JsonLd data={breadcrumbSchema([{ name: "About", path: "/about" }])} />
       <PageIntro title="Experience rooted in healing."
-        aside={<Placeholder label={`Portrait of ${SITE.practitioner}`} className="mx-auto aspect-[4/5] w-full max-w-sm rounded-t-[999px] rounded-b-[2rem] shadow-[var(--shadow-lift)]" />}>
+        aside={<Portrait alt={`${SITE.practitioner}, clinical psychologist`} priority className="mx-auto w-full max-w-sm" />}>
         {SITE.practitioner} is a registered clinical psychologist who works with adults navigating trauma, change and the question of who they are becoming.
       </PageIntro>
 

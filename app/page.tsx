@@ -1,9 +1,10 @@
+import Image from "next/image";
 import Link from "next/link";
-import { AREAS, SERVICE_AREAS, STAGES } from "@/lib/site";
+import { AREAS, SERVICE_AREAS, SITE, STAGES } from "@/lib/site";
 import { JsonLd } from "@/components/site/json-ld";
 import { pageMeta, practiceSchema, websiteSchema } from "@/lib/seo";
 import { SiteShell } from "@/components/site/site-shell";
-import { Arcs, CtaBand, Placeholder } from "@/components/site/parts";
+import { Arcs, CtaBand, Portrait } from "@/components/site/parts";
 import { Sprig } from "@/components/shell/ornament";
 import { LinkButton } from "@/components/ui/button";
 import { Icon, type IconName } from "@/components/ui/icon";
@@ -44,7 +45,7 @@ export default function Home() {
             </ul>
           </div>
           <div className="relative mx-auto w-full max-w-md lg:max-w-none">
-            <Placeholder label="Portrait of your psychologist, or a calm consulting room" className="aspect-[4/5] w-full rounded-t-[999px] rounded-b-[2rem] shadow-[var(--shadow-lift)]" />
+            <Portrait alt={`${SITE.practitioner}, clinical psychologist`} priority className="w-full" />
             <figure className="absolute -bottom-6 -left-2 flex max-w-[17rem] items-center gap-3 rounded-card bg-sage-900 px-5 py-4 text-sage-100 shadow-[var(--shadow-lift)] sm:-left-8">
               <Sprig className="text-3xl text-gold-400" />
               <p className="font-script text-2xl leading-tight text-gold-200">Small steps create meaningful change.</p>
@@ -106,7 +107,10 @@ export default function Home() {
 
       <section className="on-dark relative overflow-hidden bg-sage-900 text-sage-100">
         <div className={`${CONTAINER} grid gap-12 py-16 lg:grid-cols-2 lg:items-center lg:py-24`}>
-          <Placeholder label="A therapy session in progress, or a warm detail of the consulting room" className="reveal aspect-[4/3] rounded-card" />
+          <div className="reveal overflow-hidden rounded-[1.75rem] shadow-[0_18px_40px_-14px_rgb(0_0_0/0.5)] ring-1 ring-gold-400/40">
+            <Image src="/images/therapy-session.png" alt="A client talking with their psychologist during a therapy session" width={612} height={408}
+                   sizes="(min-width: 1024px) 34rem, 100vw" className="aspect-[4/3] w-full object-cover object-[35%_50%]" />
+          </div>
           <div className="reveal">
             <h2 className="text-3xl text-white sm:text-4xl">A collaborative approach to healing.</h2>
             <p className="mt-4 max-w-lg text-sage-300">Every person arrives with a different story, so the work is shaped around yours. It draws on evidence-based practice and stays flexible as you change.</p>

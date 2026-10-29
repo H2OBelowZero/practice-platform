@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
@@ -12,6 +13,17 @@ export function Placeholder({ label, className }: { label: string; className?: s
       <Sprig className="text-6xl text-sage-500" />
       <span className="max-w-[16rem] text-sm font-medium">{label}</span>
       <span aria-hidden="true" className="absolute inset-3 rounded-[inherit] border border-dashed border-sage-500/60" />
+    </div>
+  );
+}
+
+/** The practitioner's portrait in the brand's arch. The photo has a white backdrop, so the gold ring and soft shadow define the arch against the ivory page. */
+export function Portrait({ alt, className, priority }: { alt: string; className?: string; priority?: boolean }) {
+  return (
+    <div className={cx("relative overflow-hidden rounded-t-[999px] rounded-b-[2rem] bg-white shadow-[var(--shadow-lift)] ring-1 ring-gold-400/50", className)}>
+      <Image src="/images/psychologist-portrait.webp" alt={alt} width={1085} height={1450} priority={priority}
+             sizes="(min-width: 1024px) 28rem, (min-width: 640px) 24rem, 100vw"
+             className="aspect-[4/5] h-auto w-full object-cover object-[50%_20%]" />
     </div>
   );
 }
