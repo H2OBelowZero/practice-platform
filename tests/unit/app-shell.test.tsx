@@ -42,7 +42,7 @@ describe("robots and manifest", () => {
   });
   it("manifest is standalone with token colours and an svg icon", () => {
     const m = manifest();
-    expect(m).toMatchObject({ name: "Practice Platform", display: "standalone", background_color: "#f7f3ea", theme_color: "#173a2f" });
+    expect(m).toMatchObject({ name: "Dr. Nkala Psychology and Consulting Practice", display: "standalone", background_color: "#f7f3ea", theme_color: "#173a2f" });
     expect(m.icons?.[0].src).toBe("/icon.svg");
   });
 });

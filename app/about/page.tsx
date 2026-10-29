@@ -5,7 +5,7 @@ import { SiteShell } from "@/components/site/site-shell";
 import { CtaBand, PageIntro, Placeholder } from "@/components/site/parts";
 import { LinkButton } from "@/components/ui/button";
 
-export const metadata = pageMeta("/about", "About your psychologist in Johannesburg", "Meet a registered clinical psychologist working with adults in Johannesburg and Sandton, and learn how trauma-informed therapy here works.");
+export const metadata = pageMeta("/about", "About your psychologist in Randburg, Johannesburg", "Meet a registered clinical psychologist working with adults in Randburg, Johannesburg and Sandton, and learn how trauma-informed therapy here works.");
 
 const CONTAINER = "mx-auto max-w-6xl px-4 sm:px-8";
 

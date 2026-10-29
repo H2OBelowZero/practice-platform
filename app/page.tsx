@@ -14,7 +14,7 @@ const STEPS: { icon: IconName; title: string; text: string }[] = [
   { icon: "card", title: "Pay securely", text: "Receive invoices and pay online, or keep a record of other payments." },
 ];
 
-export const metadata = pageMeta("/", "Psychologist in Johannesburg & Sandton | Trauma-informed therapy", "Trauma-informed psychotherapy for adults in Johannesburg, Sandton and across Gauteng. Book online, complete your forms securely and claim from your medical aid.", { title: { absolute: "Psychologist in Johannesburg & Sandton | Trauma-informed therapy" } });
+export const metadata = pageMeta("/", "Psychologist in Randburg & Johannesburg | Trauma-informed therapy", "Trauma-informed psychotherapy for adults in Randburg, Johannesburg, Sandton and across Gauteng. Book online, complete your forms securely and claim from your medical aid.", { title: { absolute: "Psychologist in Randburg & Johannesburg | Trauma-informed therapy" } });
 
 const CONTAINER = "mx-auto max-w-6xl px-4 sm:px-8";
 
@@ -26,12 +26,12 @@ export default function Home() {
         <Arcs className="absolute -bottom-16 -left-24 w-[38rem] max-w-[95vw] -scale-x-100" />
         <div className={`${CONTAINER} relative grid gap-12 py-12 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:py-24`}>
           <div className="hero-in">
-            <p className="mb-4 text-sm font-medium uppercase tracking-[0.18em] text-gold-700">Psychologist in Johannesburg &amp; Sandton</p>
+            <p className="mb-4 text-sm font-medium uppercase tracking-[0.18em] text-gold-700">Psychologist in Randburg, Johannesburg &amp; Sandton</p>
             <h1 className="text-[2.5rem] leading-[1.08] sm:text-6xl">
               Look back with care.<br />Live fully now.<br /><span className="text-sage-700">Grow toward what&rsquo;s next.</span>
             </h1>
             <p className="mt-6 max-w-lg text-lg text-ink-muted">
-              Thoughtful, trauma-informed psychotherapy for adults in Johannesburg, Sandton and across Gauteng, in a calm and private space. Book online, complete your forms and manage your payments in one place.
+              Thoughtful, trauma-informed psychotherapy for adults in Randburg, Johannesburg, Sandton and across Gauteng, in a calm and private space. Book online, complete your forms and manage your payments in one place.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <LinkButton href="/book">Book an appointment</LinkButton>
@@ -151,9 +151,9 @@ export default function Home() {
 
       <section className={`${CONTAINER} pb-16 lg:pb-24`}>
         <div className="reveal max-w-3xl">
-          <h2 className="text-3xl sm:text-4xl">Psychotherapy in Johannesburg, Sandton and across Gauteng.</h2>
+          <h2 className="text-3xl sm:text-4xl">Psychotherapy in Randburg, Johannesburg, Sandton and across Gauteng.</h2>
           <p className="mt-4 text-lg text-ink-muted">Clients come to us from {SERVICE_AREAS.slice(0, -1).join(", ")} and {SERVICE_AREAS[SERVICE_AREAS.length - 1]}, and from across Gauteng. Many can claim from their medical aid. Fees and claiming are explained before you book.</p>
-          <LinkButton href="/contact" variant="secondary" className="mt-6">Find the practice</LinkButton>
+          <LinkButton href="/contact" variant="secondary" className="mt-6">Find the rooms in Randburg</LinkButton>
         </div>
       </section>
 

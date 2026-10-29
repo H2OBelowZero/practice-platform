@@ -5,7 +5,7 @@ import { breadcrumbSchema, pageMeta } from "@/lib/seo";
 import { SiteShell } from "@/components/site/site-shell";
 import { CtaBand, PageIntro, Placeholder } from "@/components/site/parts";
 
-export const metadata = pageMeta("/blog", "Blog: reflections on trauma, anxiety and belonging", "Plain-language writing on trauma, anxiety, relationships and belonging from a Johannesburg psychology practice.");
+export const metadata = pageMeta("/blog", "Blog: reflections on trauma, anxiety and belonging", "Plain-language writing on trauma, anxiety, relationships and belonging from a Randburg psychology practice.");
 
 const CONTAINER = "mx-auto max-w-6xl px-4 sm:px-8";
 

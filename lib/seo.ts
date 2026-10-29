@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { AREAS, BRAND, FAQ, isReal, SERVICE_AREAS, SITE, siteUrl, type Post } from "@/lib/site";
 
 export const DEFAULT_DESCRIPTION =
-  "Trauma-informed psychotherapy for adults in Johannesburg, Sandton and across Gauteng. Book online, complete your forms securely and claim from your medical aid.";
+  "Trauma-informed psychotherapy for adults in Randburg, Johannesburg, Sandton and across Gauteng. Book online, complete your forms securely and claim from your medical aid.";
 
 /** Per-page metadata: canonical URL, social cards and a Johannesburg/Gauteng-aware title. `path` is the route ("/about"). */
 export function pageMeta(path: string, title: string, description: string, extra: Metadata = {}): Metadata {
@@ -31,7 +31,9 @@ export function practiceSchema() {
     image: abs("/opengraph-image"),
     address: {
       "@type": "PostalAddress",
-      ...(isReal(SITE.location) && { addressLocality: SITE.location }),
+      streetAddress: SITE.street,
+      addressLocality: SITE.locality,
+      postalCode: SITE.postalCode,
       addressRegion: "Gauteng",
       addressCountry: "ZA",
     },
@@ -41,9 +43,10 @@ export function practiceSchema() {
     ],
     knowsAbout: AREAS.map((a) => a.title),
     availableLanguage: "en",
-    ...(isReal(SITE.phone) && { telephone: SITE.phone }),
+    // A South African number is +27 then nine digits; anything else is not published as a callable number.
+    ...(isReal(SITE.phone) && /^tel:\+27\d{9}$/.test(SITE.phoneHref) && { telephone: SITE.phone }),
     ...(isReal(SITE.email) && { email: SITE.email }),
-    ...(isReal(SITE.practitioner) && { founder: { "@type": "Person", name: SITE.practitioner, jobTitle: "Clinical Psychologist" } }),
+    ...(isReal(SITE.practitioner) && { founder: { "@type": "Person", name: SITE.practitioner, jobTitle: "Psychologist" } }),
   };
 }
 

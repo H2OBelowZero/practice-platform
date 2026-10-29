@@ -19,7 +19,7 @@ import { pageMeta } from "@/lib/seo";
 import { ConfirmForm } from "./confirm-form";
 
 // Canonical drops the date/slot query so every booking-step URL consolidates on /book.
-export const metadata = pageMeta("/book", "Book a psychologist appointment online in Johannesburg", "Choose a session time online with a psychologist serving Johannesburg, Sandton and Gauteng. Secure forms and payment, no account needed to look.");
+export const metadata = pageMeta("/book", "Book a psychologist appointment online in Randburg", "Choose a session time online with a psychologist serving Randburg, Johannesburg, Sandton and Gauteng. Secure forms and payment, no account needed to look.");
 
 type SessionType = { id: string; name: string; duration_min: number; fee_cents: number; format: string };
 const STEPS = ["Session", "Date and time", "Your account", "Confirm"];

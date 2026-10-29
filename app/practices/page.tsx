@@ -5,7 +5,7 @@ import { LinkButton } from "@/components/ui/button";
 import { JsonLd } from "@/components/site/json-ld";
 import { breadcrumbSchema, faqSchema, pageMeta } from "@/lib/seo";
 
-export const metadata = pageMeta("/practices", "Trauma, anxiety and relationship therapy in Johannesburg", "Therapy for trauma, anxiety, relationships, identity and life transitions in Johannesburg, Sandton and Gauteng. How sessions work, medical aid and common questions.");
+export const metadata = pageMeta("/practices", "Trauma, anxiety and relationship therapy in Randburg", "Therapy for trauma, anxiety, relationships, identity and life transitions in Randburg, Johannesburg, Sandton and Gauteng. How sessions work, medical aid and common questions.");
 
 const CONTAINER = "mx-auto max-w-6xl px-4 sm:px-8";
 

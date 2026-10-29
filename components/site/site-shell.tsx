@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { cx } from "@/lib/cx";
-import { NAV, SITE } from "@/lib/site";
+import { BRAND_SHORT, BRAND_TAGLINE, NAV, SITE } from "@/lib/site";
 import { getCrisisText } from "@/lib/practice";
 import { SkipLink } from "@/components/ui/skip-link";
 import { EmergencyNotice } from "@/components/ui/emergency-notice";
@@ -21,7 +21,7 @@ export async function SiteShell({ children, narrow }: { children: React.ReactNod
       <footer className="on-dark bg-sage-950 text-sage-300">
         <div className="mx-auto grid max-w-6xl gap-10 px-4 py-12 sm:px-8 md:grid-cols-[1.4fr_1fr_1fr]">
           <div>
-            <Wordmark name="Practice Platform" tagline="Psychology practice" dark className="text-base" />
+            <Wordmark name={BRAND_SHORT} tagline={BRAND_TAGLINE} dark className="text-base" />
             <p className="mt-4 max-w-xs text-[0.95rem]">Thoughtful, trauma-informed psychotherapy in a calm, private space.</p>
           </div>
           <nav aria-label="Footer">

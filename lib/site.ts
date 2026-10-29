@@ -1,11 +1,14 @@
 // Public-site content in one place. Everything marked PLACEHOLDER is stand-in text for the practice to replace before launch.
 
 export const SITE = {
-  practitioner: "Dr. [Surname]", // PLACEHOLDER
-  phone: "+27 00 000 0000", // PLACEHOLDER
-  phoneHref: "tel:+27000000000", // PLACEHOLDER
-  email: "hello@example.com", // PLACEHOLDER
-  location: "[Suburb], [City]", // PLACEHOLDER
+  practitioner: "Dr. Nkala",
+  phone: "+27-481-5838",
+  phoneHref: "tel:+274815838",
+  email: "zusiphenkala13@gmail.com",
+  location: "58 6th St, Randburg, 2193",
+  street: "58 6th St",
+  locality: "Randburg",
+  postalCode: "2193",
   hours: "Monday to Friday, 08:00 to 17:00", // PLACEHOLDER
   registration: "HPCSA registration no. [000 0000] · Practice no. [000 0000]", // PLACEHOLDER
 };
@@ -13,11 +16,13 @@ export const SITE = {
 /** True once a SITE value has been replaced with real practice details (placeholders hold brackets, example.com or all-zero digits). */
 export const isReal = (v: string) => !/\[|example\.com|0000/.test(v);
 
-/** Brand name used in titles and structured data. PLACEHOLDER: replace with the practice's trading name. */
-export const BRAND = "Practice Platform";
+/** Practice name: full form for structured data and share cards, short form and tagline for the wordmark and page titles. */
+export const BRAND = "Dr. Nkala Psychology and Consulting Practice";
+export const BRAND_SHORT = "Dr. Nkala";
+export const BRAND_TAGLINE = "Psychology and consulting practice";
 
 /** The Gauteng catchment the site targets. Used in titles, copy and the LocalBusiness areaServed. */
-export const SERVICE_AREAS = ["Johannesburg", "Sandton", "Randburg", "Rosebank", "Bryanston", "Fourways", "Midrand"] as const;
+export const SERVICE_AREAS = ["Randburg", "Johannesburg", "Sandton", "Rosebank", "Bryanston", "Fourways", "Midrand"] as const;
 
 /** Blog posts carry placeholder body text. While false they are noindex and left out of the sitemap, so thin duplicate pages never reach Google. Set true when real articles replace POST_BODY. */
 export const POSTS_PUBLISHED = false;

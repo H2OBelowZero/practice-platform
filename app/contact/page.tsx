@@ -6,7 +6,7 @@ import { PageIntro, Placeholder } from "@/components/site/parts";
 import { buttonClass, LinkButton } from "@/components/ui/button";
 import { Icon, type IconName } from "@/components/ui/icon";
 
-export const metadata = pageMeta("/contact", "Contact a psychologist in Johannesburg & Sandton", "Call, email or book online with a psychologist serving Johannesburg, Sandton and Gauteng. Find the rooms, hours and what happens after you reach out.");
+export const metadata = pageMeta("/contact", "Contact a psychologist in Randburg, Johannesburg", "Call, email or book online with a psychologist serving Randburg, Johannesburg, Sandton and Gauteng. Find the rooms, hours and what happens after you reach out.");
 
 const CONTAINER = "mx-auto max-w-6xl px-4 sm:px-8";
 

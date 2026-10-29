@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { cx } from "@/lib/cx";
-import { NAV } from "@/lib/site";
+import { BRAND_SHORT, BRAND_TAGLINE, NAV } from "@/lib/site";
 import { buttonClass } from "@/components/ui/button";
 import { Wordmark } from "@/components/shell/ornament";
 
@@ -36,7 +36,7 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-40 border-b border-line/70 bg-canvas/90 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-8">
-        <Link href="/" className="min-w-0 text-[0.8rem] no-underline sm:text-base"><Wordmark name="Practice Platform" tagline="Psychology practice" /></Link>
+        <Link href="/" className="min-w-0 text-[0.8rem] no-underline sm:text-base"><Wordmark name={BRAND_SHORT} tagline={BRAND_TAGLINE} /></Link>
         <nav aria-label="Main" className="hidden items-center gap-7 lg:flex">{NAV.map((n) => link(n.href, n.label))}</nav>
         <div className="flex items-center gap-2">
           {/* Wrapped, not `hidden` on the link: buttonClass sets inline-flex, which wins over a bare `hidden`. */}
