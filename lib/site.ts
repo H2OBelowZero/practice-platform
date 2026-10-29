@@ -2,8 +2,8 @@
 
 export const SITE = {
   practitioner: "Dr. Nkala",
-  phone: "+27-481-5838",
-  phoneHref: "tel:+274815838",
+  phone: "+27 11 481 5838",
+  phoneHref: "tel:+27114815838",
   email: "zusiphenkala13@gmail.com",
   location: "58 6th St, Randburg, 2193",
   street: "58 6th St",
