@@ -8,7 +8,7 @@ const example = readFileSync(join(root, ".env.example"), "utf8");
 const documented = new Set([...example.matchAll(/^#?\s*([A-Z][A-Z0-9_]+)=/gm)].map((m) => m[1]));
 
 /** Set by the platform or the runtime, not by the owner. */
-const PLATFORM = new Set(["NODE_ENV", "NEXT_RUNTIME", "CI", "VERCEL", "VERCEL_ENV", "VERCEL_URL", "TEST_WORKER_INDEX", "PORT", "npm_config_script_shell"]);
+const PLATFORM = new Set(["NODE_ENV", "NEXT_RUNTIME", "CI", "VERCEL", "VERCEL_ENV", "VERCEL_URL", "VERCEL_PROJECT_PRODUCTION_URL", "TEST_WORKER_INDEX", "PORT", "npm_config_script_shell"]);
 
 function files(dir: string, ext = /\.(ts|tsx|mjs)$/): string[] {
   const out: string[] = [];

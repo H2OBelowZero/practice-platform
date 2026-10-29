@@ -15,9 +15,11 @@ import { Card, Panel } from "@/components/ui/card";
 import { Input } from "@/components/ui/field";
 import { Notice } from "@/components/ui/notice";
 import { PageHeader } from "@/components/ui/page-header";
+import { pageMeta } from "@/lib/seo";
 import { ConfirmForm } from "./confirm-form";
 
-export const metadata = { title: "Book an appointment" };
+// Canonical drops the date/slot query so every booking-step URL consolidates on /book.
+export const metadata = pageMeta("/book", "Book a psychologist appointment online in Johannesburg", "Choose a session time online with a psychologist serving Johannesburg, Sandton and Gauteng. Secure forms and payment, no account needed to look.");
 
 type SessionType = { id: string; name: string; duration_min: number; fee_cents: number; format: string };
 const STEPS = ["Session", "Date and time", "Your account", "Confirm"];

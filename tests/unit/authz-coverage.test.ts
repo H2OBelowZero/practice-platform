@@ -19,6 +19,11 @@ import { join, relative } from "node:path";
 type Own = { auth: RegExp; before?: RegExp };
 const PUBLIC_PAGES: Record<string, { reason: string; own?: Own }> = {
   "app/page.tsx": { reason: "landing page" },
+  "app/about/page.tsx": { reason: "public marketing page, static content" },
+  "app/practices/page.tsx": { reason: "public marketing page, static content" },
+  "app/contact/page.tsx": { reason: "public marketing page, static content" },
+  "app/blog/page.tsx": { reason: "public marketing page, static content" },
+  "app/blog/[slug]/page.tsx": { reason: "public blog post, static content" },
   "app/(public)/book/page.tsx": { reason: "booking starts anonymously (slots are public); booking itself needs requireRole in bookAppointment" },
   "app/(auth)/register/page.tsx": { reason: "sign-up form" },
   "app/(auth)/login/page.tsx": { reason: "sign-in form" },

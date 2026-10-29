@@ -1,10 +1,19 @@
 import type { Metadata, Viewport } from "next";
 import { Allura, DM_Sans, Montserrat } from "next/font/google";
 import "./globals.css";
+import { BRAND, siteUrl } from "@/lib/site";
+import { DEFAULT_DESCRIPTION } from "@/lib/seo";
 
 export const metadata: Metadata = {
-  title: { default: "Practice Platform", template: "%s | Practice Platform" },
-  description: "Online booking and client portal for a private psychology practice.",
+  metadataBase: new URL(siteUrl()),
+  title: { default: `Psychologist in Johannesburg & Sandton | ${BRAND}`, template: `%s | ${BRAND}` },
+  description: DEFAULT_DESCRIPTION,
+  applicationName: BRAND,
+  openGraph: { type: "website", locale: "en_ZA", siteName: BRAND, images: ["/opengraph-image"] },
+  twitter: { card: "summary_large_image", images: ["/opengraph-image"] },
+  robots: { index: true, follow: true },
+  // Regional hints for search engines that still read them.
+  other: { "geo.region": "ZA-GT", "geo.placename": "Johannesburg" },
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#f7f3ea" };

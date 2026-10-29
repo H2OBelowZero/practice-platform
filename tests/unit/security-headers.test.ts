@@ -38,7 +38,7 @@ describe("no-store (R35)", () => {
   });
   it("covers every top-level route that is not public", () => {
     // Fails when someone adds an app/<area> that renders signed-in data without listing it above.
-    const PUBLIC = new Set(["book"]); // marketing / booking pages may cache normally
+    const PUBLIC = new Set(["book", "about", "practices", "contact", "blog"]); // marketing / booking pages may cache normally
     const top = readdirSync("app").filter((n) => statSync(join("app", n)).isDirectory() && !n.startsWith("("));
     const uncovered = top.filter((n) => !PUBLIC.has(n) && !noStoreSources.some((s) => s.startsWith(`/${n}/`) || s === `/${n}`));
     expect(uncovered).toEqual([]);

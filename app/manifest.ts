@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Practice Platform",
     short_name: "Practice",
-    description: "Online booking and client portal for a private psychology practice.",
+    description: "Trauma-informed psychotherapy in Johannesburg, Sandton and Gauteng. Book online and manage your forms and payments.",
     start_url: "/",
     display: "standalone",
     background_color: "#f7f3ea",
