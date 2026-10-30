@@ -17,14 +17,12 @@ export function Placeholder({ label, className }: { label: string; className?: s
   );
 }
 
-/** The practitioner's portrait in the brand's arch. The photo has a white backdrop, so the gold ring and soft shadow define the arch against the ivory page. */
+/** The practitioner's cut-out portrait (transparent WebP): no frame, so it sits straight on the page colour. The cropped shoulders fade out at the bottom instead of ending on a hard edge. */
 export function Portrait({ alt, className, priority }: { alt: string; className?: string; priority?: boolean }) {
   return (
-    <div className={cx("relative overflow-hidden rounded-t-[999px] rounded-b-[2rem] bg-white shadow-[var(--shadow-lift)] ring-1 ring-gold-400/50", className)}>
-      <Image src="/images/psychologist-portrait.webp" alt={alt} width={1085} height={1450} priority={priority}
-             sizes="(min-width: 1024px) 28rem, (min-width: 640px) 24rem, 100vw"
-             className="aspect-[4/5] h-auto w-full object-cover object-[50%_20%]" />
-    </div>
+    <Image src="/images/psychologist-portrait.webp" alt={alt} width={1085} height={1450} priority={priority}
+           sizes="(min-width: 1024px) 28rem, (min-width: 640px) 24rem, 100vw"
+           className={cx("h-auto w-full [mask-image:linear-gradient(to_bottom,#000_78%,transparent)]", className)} />
   );
 }
 
