@@ -108,8 +108,8 @@ export default function Home() {
       <section className="on-dark relative overflow-hidden bg-sage-900 text-sage-100">
         <div className={`${CONTAINER} grid gap-12 py-16 lg:grid-cols-2 lg:items-center lg:py-24`}>
           <div className="reveal overflow-hidden rounded-[1.75rem] shadow-[0_18px_40px_-14px_rgb(0_0_0/0.5)] ring-1 ring-gold-400/40">
-            <Image src="/images/therapy-session.png" alt="A client talking with their psychologist during a therapy session" width={612} height={408}
-                   sizes="(min-width: 1024px) 34rem, 100vw" className="aspect-[4/3] w-full object-cover object-[35%_50%]" />
+            <Image src="/images/therapy-session.webp" alt="A client talking with their psychologist during a therapy session" width={1537} height={1023}
+                   sizes="(min-width: 1024px) 34rem, 100vw" className="aspect-[4/3] w-full object-cover object-[45%_50%]" />
           </div>
           <div className="reveal">
             <h2 className="text-3xl text-white sm:text-4xl">A collaborative approach to healing.</h2>
